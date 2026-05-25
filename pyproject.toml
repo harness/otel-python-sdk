@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-trace-sdk"
+version = "0.1.0"
+description = "Generic Python agent SDK with instrumentation and plugin architecture"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "opentelemetry-api==1.41.1",
+    "opentelemetry-exporter-otlp==1.41.1",
+    "opentelemetry-instrumentation==0.62b1",
+    "opentelemetry-instrumentation-aiohttp-client==0.62b1",
+    "opentelemetry-instrumentation-botocore==0.62b1",
+    "opentelemetry-instrumentation-wsgi==0.62b1",
+    "opentelemetry-instrumentation-fastapi==0.62b1",
+    "opentelemetry-instrumentation-flask==0.62b1",
+    "opentelemetry-instrumentation-mysql==0.62b1",
+    "opentelemetry-instrumentation-psycopg2==0.62b1",
+    "opentelemetry-instrumentation-requests==0.62b1",
+    "opentelemetry-instrumentation-httpx==0.62b1",
+    "opentelemetry-instrumentation-grpc==0.62b1",
+    "opentelemetry-instrumentation-django==0.62b1",
+    "opentelemetry-instrumentation-aws-lambda==0.62b1",
+    "opentelemetry-instrumentation-mcp==0.60.0",
+    "opentelemetry-semantic-conventions-ai>=0.5.1,<0.6.0",
+    "opentelemetry-propagator-b3==1.41.1",
+    "opentelemetry-proto==1.41.1",
+    "opentelemetry-sdk==1.41.1",
+    "opentelemetry-util-http==0.62b1",
+    "google>=3.0.0",
+    "pyyaml",
+    "protobuf",
+    "psutil",
+    "distro",
+    "setuptools",
+    "jaraco.text",
+    "platformdirs",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.34.0"]
+openai = ["openai>=1.40.0"]
+litellm = ["litellm>=1.60.0"]
+
+[project.scripts]
+agent-trace-instrument = "agent_trace.autoinstrumentation.wrapper:run"
+
+[project.entry-points.agent_trace_observability_plugin]
+builtin_pipeline = "agent_trace.plugins.builtin.pipeline:factory"
+builtin_span_attributes = "agent_trace.plugins.builtin.span_attributes:factory"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
