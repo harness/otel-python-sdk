@@ -5,7 +5,7 @@ on:
     tags:
       - "v*.*.*"
   release:
-    types: [published]
+    types: [published, prereleased]
 
 concurrency:
   group: publish-${{ github.event.release.tag_name || github.ref }}
