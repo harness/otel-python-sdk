@@ -44,6 +44,58 @@ GitHub Actions workflows (public repo, `ubuntu-latest`):
 
 Version is taken from the tag (`v1.2.3` → `1.2.3`) via `scripts/build.sh`, which updates `src/harness_sdk/version.py` and `pyproject.toml`.
 
+## Installing
+
+### From PyPI (stable releases)
+
+```bash
+pip install harness-sdk
+```
+
+Optional instrumentation extras:
+
+```bash
+pip install "harness-sdk[anthropic,openai,litellm]"
+```
+
+### From TestPyPI (release candidates)
+
+Tags containing `-rc` (for example `v1.0.0-rc.1`) are published only to [TestPyPI](https://test.pypi.org/project/harness-sdk/). Use TestPyPI as the primary index and PyPI as a fallback so dependencies that are not on TestPyPI still resolve:
+
+```bash
+pip install \
+  --index-url https://test.pypi.org/simple/ \
+  --extra-index-url https://pypi.org/simple/ \
+  "harness-sdk==1.0.0-rc.1"
+```
+
+With optional extras:
+
+```bash
+pip install \
+  --index-url https://test.pypi.org/simple/ \
+  --extra-index-url https://pypi.org/simple/ \
+  "harness-sdk[anthropic,openai,litellm]==1.0.0-rc.1"
+```
+
+Pin the version to the RC you want (see [published files](https://test.pypi.org/project/harness-sdk/#history) on TestPyPI). The version string matches the tag without the leading `v` (tag `v1.0.0-rc.1` → `1.0.0-rc.1`). In a virtualenv or `requirements.txt`, the same flags apply:
+
+```text
+--index-url https://test.pypi.org/simple/
+--extra-index-url https://pypi.org/simple/
+harness-sdk==1.0.0-rc.1
+```
+
+After install, import and auto-instrument work the same as a PyPI release:
+
+```python
+from harness_sdk.agent import Agent
+```
+
+```bash
+harness-instrument python app.py
+```
+
 ## Usage
 
 ```python
