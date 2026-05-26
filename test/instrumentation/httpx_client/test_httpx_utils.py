@@ -3,7 +3,7 @@ import zlib
 
 import pytest
 
-from agent_trace.instrumentation.httpx.utils import decode_response_body_for_capture
+from harness_sdk.instrumentation.httpx.utils import decode_response_body_for_capture
 
 
 def test_decode_gzip_response_body():

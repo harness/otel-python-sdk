@@ -6,7 +6,7 @@ import requests
 from requests import post
 from flask import Flask
 from test import setup_custom_logger
-from test.agent_trace.agent.instrumentation.flask.app import FlaskServer
+from test.instrumentation.flask.app import FlaskServer
 
 
 def test_request_client(agent, exporter):

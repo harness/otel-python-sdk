@@ -1,3 +1,4 @@
+from test.control_test_helpers import AlwaysBlockControlPlugin
 """Tests for OpenAI SDK instrumentation (gen_ai spans + evaluate_agent_span)."""
 
 from types import SimpleNamespace
@@ -11,10 +12,9 @@ from openai import AsyncOpenAI, OpenAI
 from openai.resources.chat.completions.completions import AsyncCompletions, Completions
 from openai.resources.embeddings import AsyncEmbeddings, Embeddings
 
-from agent_trace.filter.registry import Registry
-from agent_trace.filter.traceable import LibtraceableProcessResult
-from agent_trace.gen_ai.exceptions import TraceableEvaluationBlocked
-from agent_trace.instrumentation.openai import OpenAIInstrumentorWrapper
+from harness_sdk.plugins.control import ControlResult, get_control_registry
+from harness_sdk.gen_ai.exceptions import ControlEvaluationBlocked
+from harness_sdk.instrumentation.openai import OpenAIInstrumentorWrapper
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def openai_instrumentor():
     yield wrapper
     if getattr(wrapper, "_applied", False):
         wrapper.uninstrument()
-    Registry().filter = None
+    get_control_registry().clear()
 
 
 class _FakeMessage:
@@ -74,13 +74,6 @@ def test_openai_span_has_gen_ai_attributes(agent, exporter, openai_instrumentor)
     assert attrs.get("gen_ai.usage.output_tokens") == 7
 
 
-class _AlwaysBlockGenAiFilter:
-    def evaluate_agent_span(self, span, body=""):  # pylint: disable=unused-argument
-        res = LibtraceableProcessResult(None)
-        res.block = True
-        res.response_message = "blocked"
-        return res
-
 
 def test_openai_evaluate_blocks_before_fake_create(agent, exporter, openai_instrumentor):  # pylint: disable=unused-argument
     calls = {"n": 0}
@@ -89,12 +82,12 @@ def test_openai_evaluate_blocks_before_fake_create(agent, exporter, openai_instr
         calls["n"] += 1
         return _FakeChatCompletion()
 
-    Registry().register(_AlwaysBlockGenAiFilter)
+    get_control_registry().register(AlwaysBlockControlPlugin())
 
     with patch.object(Completions, "create", new=counting_fake):
         openai_instrumentor.instrument()
         client = OpenAI(api_key="sk-test")
-        with pytest.raises(TraceableEvaluationBlocked):
+        with pytest.raises(ControlEvaluationBlocked):
             client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": "hi"}],
@@ -279,12 +272,12 @@ def test_openai_embeddings_evaluate_blocks_before_wrapped(agent, exporter, opena
         calls["n"] += 1
         return _FakeEmbeddingResponse()
 
-    Registry().register(_AlwaysBlockGenAiFilter)
+    get_control_registry().register(AlwaysBlockControlPlugin())
 
     with patch.object(Embeddings, "create", new=counting_fake):
         openai_instrumentor.instrument()
         client = OpenAI(api_key="sk-test")
-        with pytest.raises(TraceableEvaluationBlocked):
+        with pytest.raises(ControlEvaluationBlocked):
             client.embeddings.create(model="text-embedding-3-small", input="x")
 
     assert calls["n"] == 0
@@ -326,8 +319,8 @@ def test_double_instrument_is_noop(agent, exporter, openai_instrumentor):  # pyl
 
 def test_gen_ai_disabled_passthrough_chat(agent, exporter, openai_instrumentor):  # pylint: disable=unused-argument
     import os
-    os.environ["TA_GEN_AI_ENABLED"] = "false"
-    from agent_trace.config.config import Config
+    os.environ["HA_GEN_AI_ENABLED"] = "false"
+    from harness_sdk.config.config import Config
     Config._instance = None
 
     calls = {"n": 0}
@@ -350,8 +343,8 @@ def test_gen_ai_disabled_passthrough_chat(agent, exporter, openai_instrumentor):
 @pytest.mark.asyncio
 async def test_gen_ai_disabled_passthrough_async_chat(agent, exporter, openai_instrumentor):  # pylint: disable=unused-argument
     import os
-    os.environ["TA_GEN_AI_ENABLED"] = "false"
-    from agent_trace.config.config import Config
+    os.environ["HA_GEN_AI_ENABLED"] = "false"
+    from harness_sdk.config.config import Config
     Config._instance = None
 
     calls = {"n": 0}
@@ -373,8 +366,8 @@ async def test_gen_ai_disabled_passthrough_async_chat(agent, exporter, openai_in
 
 def test_gen_ai_disabled_passthrough_embeddings(agent, exporter, openai_instrumentor):  # pylint: disable=unused-argument
     import os
-    os.environ["TA_GEN_AI_ENABLED"] = "false"
-    from agent_trace.config.config import Config
+    os.environ["HA_GEN_AI_ENABLED"] = "false"
+    from harness_sdk.config.config import Config
     Config._instance = None
 
     calls = {"n": 0}
@@ -397,8 +390,8 @@ def test_gen_ai_disabled_passthrough_embeddings(agent, exporter, openai_instrume
 @pytest.mark.asyncio
 async def test_gen_ai_disabled_passthrough_async_embeddings(agent, exporter, openai_instrumentor):  # pylint: disable=unused-argument
     import os
-    os.environ["TA_GEN_AI_ENABLED"] = "false"
-    from agent_trace.config.config import Config
+    os.environ["HA_GEN_AI_ENABLED"] = "false"
+    from harness_sdk.config.config import Config
     Config._instance = None
 
     calls = {"n": 0}
@@ -490,20 +483,23 @@ async def test_async_embeddings_exception_records_error(agent, exporter, openai_
 
 def test_evaluate_invocation_skips_when_disabled(agent, exporter, openai_instrumentor):  # pylint: disable=unused-argument
     import os
-    os.environ["TA_GEN_AI_PAYLOAD_EVALUATION_ENABLED"] = "false"
-    from agent_trace.config.config import Config
+    os.environ["HA_GEN_AI_PAYLOAD_EVALUATION_ENABLED"] = "false"
+    from harness_sdk.config.config import Config
     Config._instance = None
 
     calls = {"n": 0}
 
-    class _CountingFilter:
+    class _CountingPlugin:
+        name = "counting"
+        def on_init(self, config): pass  # pylint: disable=unused-argument
+        def evaluate(self, span, url, headers, body, is_grpc):  # pylint: disable=unused-argument
+            return ControlResult()
         def evaluate_agent_span(self, span, body=""):  # pylint: disable=unused-argument
             calls["n"] += 1
-            res = LibtraceableProcessResult(None)
-            res.block = False
-            return res
+            return ControlResult()
+        def shutdown(self): pass
 
-    Registry().register(_CountingFilter)
+    get_control_registry().register(_CountingPlugin())
 
     with patch.object(Completions, "create", new=_fake_completions_create):
         openai_instrumentor.instrument()
@@ -515,11 +511,16 @@ def test_evaluate_invocation_skips_when_disabled(agent, exporter, openai_instrum
 
 
 def test_evaluate_invocation_swallows_non_block_errors(agent, exporter, openai_instrumentor):  # pylint: disable=unused-argument
-    class _ErrorFilter:
+    class _ErrorPlugin:
+        name = "error"
+        def on_init(self, config): pass  # pylint: disable=unused-argument
+        def evaluate(self, span, url, headers, body, is_grpc):  # pylint: disable=unused-argument
+            return ControlResult()
         def evaluate_agent_span(self, span, body=""):  # pylint: disable=unused-argument
             raise ValueError("filter exploded")
+        def shutdown(self): pass
 
-    Registry().register(_ErrorFilter)
+    get_control_registry().register(_ErrorPlugin())
 
     with patch.object(Completions, "create", new=_fake_completions_create):
         openai_instrumentor.instrument()
@@ -538,13 +539,13 @@ def test_embeddings_evaluate_blocks_async(agent, exporter, openai_instrumentor):
         calls["n"] += 1
         return _FakeEmbeddingResponse()
 
-    Registry().register(_AlwaysBlockGenAiFilter)
+    get_control_registry().register(AlwaysBlockControlPlugin())
 
     with patch.object(AsyncEmbeddings, "create", new=counting_fake):
         openai_instrumentor.instrument()
         import asyncio
         client = AsyncOpenAI(api_key="sk-test")
-        with pytest.raises(TraceableEvaluationBlocked):
+        with pytest.raises(ControlEvaluationBlocked):
             asyncio.get_event_loop().run_until_complete(
                 client.embeddings.create(model="text-embedding-3-small", input="x")
             )

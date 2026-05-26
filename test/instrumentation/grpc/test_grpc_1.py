@@ -11,18 +11,42 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import threading
-import time
-from concurrent import futures
-import re
-import grpc
 import json
+import re
+from concurrent import futures
+
+import grpc
 
 from test import setup_custom_logger
-
-from test.agent_trace.agent.instrumentation.grpc import helloworld_pb2_grpc, helloworld_pb2
+from test.instrumentation.grpc import helloworld_pb2, helloworld_pb2_grpc
 
 logger = setup_custom_logger(__name__)
+
+
+def _assert_grpc_round_trip(exporter, channel, name, *, expect_metadata):
+    stub = helloworld_pb2_grpc.GreeterStub(channel)
+    response = stub.SayHello(helloworld_pb2.HelloRequest(name=name))
+    assert response.message == f'Hello, {name}!'
+    logger.info("Greeter client received: %s", response.message)
+
+    span_list = exporter.get_finished_spans()
+    assert span_list
+    logger.debug('len(span_list): %s', len(span_list))
+    assert len(span_list) == 2
+    span_object = json.loads(span_list[0].to_json())
+
+    assert span_object['attributes']['rpc.system'] == 'grpc'
+    assert span_object['attributes']['rpc.method'] == 'SayHello'
+    user_agent_re = re.compile(r'grpc-python/.* grpc-c/.* (.*; chttp2)')
+    assert re.match(
+        user_agent_re, span_object['attributes']['rpc.request.metadata.user-agent'])
+    assert span_object['attributes']['rpc.request.body'] == f'{{"name": "{name}"}}'
+    assert span_object['attributes']['rpc.grpc.status_code'] == 0
+    assert span_object['attributes']['rpc.response.body'] == f'{{"message": "Hello, {name}!"}}'
+    if expect_metadata:
+        assert span_object['attributes']['rpc.response.metadata.tester2'] == 'tester2'
+        assert span_object['attributes']['rpc.response.metadata.tester'] == 'tester'
+    exporter.clear()
 
 
 def test_grpc(agent, exporter):
@@ -38,76 +62,16 @@ def test_grpc(agent, exporter):
             logger.debug('Returning response.')
             return helloworld_pb2.HelloReply(message='Hello, %s!' % request.name)
 
+    executor = futures.ThreadPoolExecutor(max_workers=10)
+    server = grpc.server(executor)
+    try:
+        helloworld_pb2_grpc.add_GreeterServicer_to_server(Greeter(), server)
+        server.add_insecure_port('[::]:50051')
+        server.start()
 
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    logger.info('Adding GreeterServicer endpoint to server.')
-    helloworld_pb2_grpc.add_GreeterServicer_to_server(Greeter(), server)
-    logger.info('Adding insecure port.')
-    server.add_insecure_port('[::]:50051')
-    logger.info('Starting server.')
-    server.start()
-    logger.info('Waiting for termination.')
-
-
-    def exit_callback():
         with grpc.insecure_channel('0.0.0.0:50051') as channel:
-            stub = helloworld_pb2_grpc.GreeterStub(channel)
-            response = stub.SayHello(helloworld_pb2.HelloRequest(name='you'))
-            assert response.message == 'Hello, you!'
-            logger.info("Greeter client received: " + response.message)
-            # Get all of the in memory spans that were recorded for this iteration
-            span_list = exporter.get_finished_spans()
-            # Confirm something was returned.
-            assert span_list
-
-            logger.debug('len(span_list): ' + str(len(span_list)))
-            # 1 span for server + 1 span for client
-            assert len(span_list) == 2
-            logger.debug('span_list: ' + str(span_list[0].attributes))
-            flaskSpanAsObject = json.loads(span_list[0].to_json())
-
-            assert flaskSpanAsObject['attributes']['rpc.system'] == 'grpc'
-            assert flaskSpanAsObject['attributes']['rpc.method'] == 'SayHello'
-            user_agent_re = re.compile(
-                'grpc-python/.* grpc-c/.* (.*; chttp2)')
-            assert re.match(
-                user_agent_re, flaskSpanAsObject['attributes']['rpc.request.metadata.user-agent'])
-            assert flaskSpanAsObject['attributes']['rpc.request.body'] == '{"name": "you"}'
-            assert flaskSpanAsObject['attributes']['rpc.grpc.status_code'] == 0
-            assert flaskSpanAsObject['attributes']['rpc.response.metadata.tester2'] == 'tester2'
-            assert flaskSpanAsObject['attributes']['rpc.response.metadata.tester'] == 'tester'
-            assert flaskSpanAsObject['attributes']['rpc.response.body'] == '{"message": "Hello, you!"}'
-            exporter.clear()
-
-            stub = helloworld_pb2_grpc.GreeterStub(channel)
-            response = stub.SayHello(helloworld_pb2.HelloRequest(name='no-metadata'))
-            assert response.message == 'Hello, no-metadata!'
-            logger.info("Greeter client received: " + response.message)
-            # Get all of the in memory spans that were recorded for this iteration
-            span_list = exporter.get_finished_spans()
-            # Confirm something was returned.
-            assert span_list
-
-            logger.debug('len(span_list): ' + str(len(span_list)))
-            # 1 span for server + 1 span for client
-            assert len(span_list) == 2
-            logger.debug('span_list: ' + str(span_list[0].attributes))
-            flaskSpanAsObject = json.loads(span_list[0].to_json())
-
-            assert flaskSpanAsObject['attributes']['rpc.system'] == 'grpc'
-            assert flaskSpanAsObject['attributes']['rpc.method'] == 'SayHello'
-            user_agent_re = re.compile(
-                'grpc-python/.* grpc-c/.* (.*; chttp2)')
-            assert re.match(
-                user_agent_re, flaskSpanAsObject['attributes']['rpc.request.metadata.user-agent'])
-            assert flaskSpanAsObject['attributes']['rpc.request.body'] == '{"name": "no-metadata"}'
-            assert flaskSpanAsObject['attributes']['rpc.grpc.status_code'] == 0
-            assert flaskSpanAsObject['attributes']['rpc.response.body'] == '{"message": "Hello, no-metadata!"}'
-            exporter.clear()
-
-
-
-    logger.info('Starting Test Run.')
-    t = threading.Thread(target=exit_callback)
-    t.start()
-    t.join(4)
+            _assert_grpc_round_trip(exporter, channel, 'you', expect_metadata=True)
+            _assert_grpc_round_trip(exporter, channel, 'no-metadata', expect_metadata=False)
+    finally:
+        server.stop(grace=0)
+        executor.shutdown(wait=False, cancel_futures=True)

@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock
 
 from opentelemetry.sdk.trace import TracerProvider
-from agent_trace.excluded_by_attribute_span_processor import ExcludeByAttributeSpanProcessor
+from harness_sdk.excluded_by_attribute_span_processor import ExcludeByAttributeSpanProcessor
 
 
 class TestFilteringSpanProcessor(unittest.TestCase):
@@ -10,7 +10,7 @@ class TestFilteringSpanProcessor(unittest.TestCase):
         self.mock_processor = MagicMock()
         self.filtering_processor = ExcludeByAttributeSpanProcessor(
             processor=self.mock_processor,
-            attribute_name="agent_trace.span_kind",
+            attribute_name="traceableai.span_kind",
             excluded_value="no_span"
         )
         self.tracer_provider = TracerProvider()
@@ -25,7 +25,7 @@ class TestFilteringSpanProcessor(unittest.TestCase):
             return span
 
     def test_span_without_span_kind_is_passed_through(self):
-        """Test that spans without agent_trace.span_kind are passed through."""
+        """Test that spans without traceableai.span_kind are passed through."""
         span = self.create_test_span({"other_attr": "value"})
 
         self.filtering_processor.on_start(span)
@@ -36,8 +36,8 @@ class TestFilteringSpanProcessor(unittest.TestCase):
         self.mock_processor.on_end.assert_called_once()
 
     def test_span_with_different_span_kind_is_passed_through(self):
-        """Test that spans with agent_trace.span_kind not equal to 'no_span' are passed through."""
-        span = self.create_test_span({"agent_trace.span_kind": "some_other_kind"})
+        """Test that spans with traceableai.span_kind not equal to 'no_span' are passed through."""
+        span = self.create_test_span({"traceableai.span_kind": "some_other_kind"})
 
         self.filtering_processor.on_start(span)
         self.filtering_processor.on_end(span)
@@ -47,8 +47,8 @@ class TestFilteringSpanProcessor(unittest.TestCase):
         self.mock_processor.on_end.assert_called_once()
 
     def test_span_with_no_span_is_filtered_out(self):
-        """Test that spans with agent_trace.span_kind='no_span' are filtered out."""
-        span = self.create_test_span({"agent_trace.span_kind": "no_span"})
+        """Test that spans with traceableai.span_kind='no_span' are filtered out."""
+        span = self.create_test_span({"traceableai.span_kind": "no_span"})
 
         self.filtering_processor.on_start(span)
         self.filtering_processor.on_end(span)

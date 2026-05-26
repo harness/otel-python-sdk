@@ -1,10 +1,10 @@
-"""Tests for :class:`agent_trace.instrumentation.mcp.McpInstrumentorWrapper`."""
+"""Tests for :class:`harness_sdk.instrumentation.mcp.McpInstrumentorWrapper`."""
 from unittest.mock import MagicMock, patch
 
 import pytest
 from opentelemetry.instrumentation.mcp import McpInstrumentor
 
-from agent_trace.instrumentation.mcp import McpInstrumentorWrapper
+from harness_sdk.instrumentation.mcp import McpInstrumentorWrapper
 
 
 @pytest.fixture
@@ -15,7 +15,7 @@ def gen_ai_enabled():
     gen.payload_evaluation_enabled.value = True
     root = MagicMock()
     root.config.gen_ai = gen
-    with patch("agent_trace.instrumentation.mcp.Config") as mock_cfg:
+    with patch("harness_sdk.instrumentation.mcp.Config") as mock_cfg:
         mock_cfg.return_value = root
         yield gen
 
@@ -25,9 +25,9 @@ def test_mcp_wrapper_skips_when_gen_ai_disabled():
     gen.enabled.value = False
     root = MagicMock()
     root.config.gen_ai = gen
-    with patch("agent_trace.instrumentation.mcp.Config") as mock_cfg:
+    with patch("harness_sdk.instrumentation.mcp.Config") as mock_cfg:
         mock_cfg.return_value = root
-        with patch("agent_trace.instrumentation.mcp.apply_gen_ai_env_for_mcp") as mock_apply:
+        with patch("harness_sdk.instrumentation.mcp.apply_gen_ai_env_for_mcp") as mock_apply:
             with patch.object(McpInstrumentor, "_instrument") as parent_instr:
                 w = McpInstrumentorWrapper()
                 w._instrument()
@@ -49,7 +49,7 @@ def test_mcp_wrapper_calls_apply_env_and_parent_when_gen_ai_on(gen_ai_enabled):
     import opentelemetry.instrumentation.mcp.instrumentation as mcp_inst
 
     orig_get_tracer = mcp_inst.get_tracer
-    with patch("agent_trace.instrumentation.mcp.apply_gen_ai_env_for_mcp") as mock_apply:
+    with patch("harness_sdk.instrumentation.mcp.apply_gen_ai_env_for_mcp") as mock_apply:
         with patch.object(McpInstrumentor, "_instrument", autospec=True) as parent_instr:
             w = McpInstrumentorWrapper()
             w._instrument(tracer_provider="tp")

@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql:9.7
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: testhypertrace
+      MYSQL_DATABASE: hypertrace
+      MYSQL_USER: hypertrace
+      MYSQL_PASSWORD: hypertrace
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-ptesthypertrace"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  pg:
+    image: postgres:18.3
+    ports:
+      - "5432:5432"
+    restart: always
+    environment:
+      POSTGRES_DB: hypertrace
+      POSTGRES_USER: hypertrace
+      POSTGRES_PASSWORD: hypertrace
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hypertrace -d hypertrace"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  db_data: {}

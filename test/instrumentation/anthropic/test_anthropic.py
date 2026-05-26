@@ -1,3 +1,4 @@
+from test.control_test_helpers import AlwaysBlockControlPlugin
 """Tests for Anthropic SDK instrumentation (gen_ai spans + evaluate_agent_span)."""
 
 import os
@@ -13,10 +14,9 @@ pytest.importorskip("anthropic")
 from anthropic import Anthropic, AsyncAnthropic
 from anthropic.resources.messages import AsyncMessages, Messages
 
-from agent_trace.filter.registry import Registry
-from agent_trace.filter.traceable import LibtraceableProcessResult
-from agent_trace.gen_ai.exceptions import TraceableEvaluationBlocked
-from agent_trace.instrumentation.anthropic import AnthropicInstrumentorWrapper
+from harness_sdk.plugins.control import ControlResult, get_control_registry
+from harness_sdk.gen_ai.exceptions import ControlEvaluationBlocked
+from harness_sdk.instrumentation.anthropic import AnthropicInstrumentorWrapper
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def anthropic_instrumentor():
     yield wrapper
     if AnthropicInstrumentorWrapper._applied:
         wrapper.uninstrument()
-    Registry().filter = None
+    get_control_registry().clear()
 
 
 class _FakeUsage:
@@ -94,13 +94,6 @@ async def test_async_messages_create_span_has_gen_ai_attributes(agent, exporter,
     assert attrs.get("gen_ai.usage.output_tokens") == 4
 
 
-class _AlwaysBlockGenAiFilter:
-    def evaluate_agent_span(self, span, body=""):  # pylint: disable=unused-argument
-        res = LibtraceableProcessResult(None)
-        res.block = True
-        res.response_message = "blocked"
-        return res
-
 
 def test_anthropic_evaluate_blocks_before_fake_create(agent, exporter, anthropic_instrumentor):
     calls = {"n": 0}
@@ -109,12 +102,12 @@ def test_anthropic_evaluate_blocks_before_fake_create(agent, exporter, anthropic
         calls["n"] += 1
         return _FakeMessage()
 
-    Registry().register(_AlwaysBlockGenAiFilter)
+    get_control_registry().register(AlwaysBlockControlPlugin())
 
     with patch.object(Messages, "create", new=counting_fake):
         anthropic_instrumentor.instrument()
         client = Anthropic(api_key="sk-test")
-        with pytest.raises(TraceableEvaluationBlocked):
+        with pytest.raises(ControlEvaluationBlocked):
             client.messages.create(
                 model="claude-3-haiku-20240307",
                 max_tokens=10,
@@ -136,12 +129,12 @@ async def test_async_messages_create_evaluate_blocks(agent, exporter, anthropic_
         calls["n"] += 1
         return _FakeMessage()
 
-    Registry().register(_AlwaysBlockGenAiFilter)
+    get_control_registry().register(AlwaysBlockControlPlugin())
 
     with patch.object(AsyncMessages, "create", new=counting_fake):
         anthropic_instrumentor.instrument()
         client = AsyncAnthropic(api_key="sk-test")
-        with pytest.raises(TraceableEvaluationBlocked):
+        with pytest.raises(ControlEvaluationBlocked):
             await client.messages.create(
                 model="claude-3-haiku-20240307",
                 max_tokens=10,
@@ -334,12 +327,12 @@ def test_messages_stream_sync_evaluate_blocks(agent, exporter, anthropic_instrum
         calls["n"] += 1
         return _FakeMessageStreamManager(_FakeSSEStream())
 
-    Registry().register(_AlwaysBlockGenAiFilter)
+    get_control_registry().register(AlwaysBlockControlPlugin())
 
     with patch.object(Messages, "stream", new=counting_stream):
         anthropic_instrumentor.instrument()
         client = Anthropic(api_key="sk-test")
-        with pytest.raises(TraceableEvaluationBlocked):
+        with pytest.raises(ControlEvaluationBlocked):
             with client.messages.stream(
                 model="claude-3-haiku-20240307",
                 max_tokens=10,
@@ -394,12 +387,12 @@ async def test_messages_stream_async_evaluate_blocks(agent, exporter, anthropic_
         calls["n"] += 1
         return _FakeAsyncMessageStreamManager(_FakeAsyncSSEStream())
 
-    Registry().register(_AlwaysBlockGenAiFilter)
+    get_control_registry().register(AlwaysBlockControlPlugin())
 
     with patch.object(AsyncMessages, "stream", new=counting_stream):
         anthropic_instrumentor.instrument()
         client = AsyncAnthropic(api_key="sk-test")
-        with pytest.raises(TraceableEvaluationBlocked):
+        with pytest.raises(ControlEvaluationBlocked):
             async with client.messages.stream(
                 model="claude-3-haiku-20240307",
                 max_tokens=10,
@@ -445,8 +438,8 @@ def test_gen_ai_disabled_passthrough(agent, exporter, anthropic_instrumentor):
         return _FakeMessage()
 
     with patch.object(Messages, "create", new=counting_fake):
-        os.environ["TA_GEN_AI_ENABLED"] = "false"
-        from agent_trace.config.config import Config
+        os.environ["HA_GEN_AI_ENABLED"] = "false"
+        from harness_sdk.config.config import Config
         Config._instance = None  # force re-read of env
 
         anthropic_instrumentor.instrument()

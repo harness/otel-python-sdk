@@ -1,7 +1,7 @@
 import unittest
 
 from opentelemetry.sdk.trace import TracerProvider
-from agent_trace.span_attributes_processor import SpanAttributesProcessor
+from harness_sdk.span_attributes_processor import SpanAttributesProcessor
 
 
 class TestSpanAttributesProcessor(unittest.TestCase):

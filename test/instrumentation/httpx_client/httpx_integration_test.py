@@ -6,7 +6,7 @@ import pytest
 from flask import Flask
 from opentelemetry.trace import SpanKind
 
-from test.agent_trace.agent.instrumentation.flask.app import FlaskServer
+from test.instrumentation.flask.app import FlaskServer
 
 
 def _client_span(spans):

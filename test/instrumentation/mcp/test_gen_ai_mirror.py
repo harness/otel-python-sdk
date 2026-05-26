@@ -5,8 +5,8 @@ import pytest
 from opentelemetry.semconv_ai import SpanAttributes as AiSpanAttributes
 from opentelemetry.semconv_ai import TraceloopSpanKindValues
 
-from agent_trace.instrumentation.mcp import gen_ai_mirror as gen_ai_mirror_mod
-from agent_trace.instrumentation.mcp.gen_ai_mirror import (
+from harness_sdk.instrumentation.mcp import gen_ai_mirror as gen_ai_mirror_mod
+from harness_sdk.instrumentation.mcp.gen_ai_mirror import (
     GenAiMirroringTracer,
     apply_gen_ai_env_for_mcp,
     mirror_traceloop_to_gen_ai,
@@ -23,7 +23,7 @@ def mock_gen_ai_config():
     gen.payload_evaluation_enabled.value = True
     cfg = MagicMock()
     cfg.gen_ai = gen
-    with patch("agent_trace.instrumentation.mcp.gen_ai_mirror.Config") as mock_cfg:
+    with patch("harness_sdk.instrumentation.mcp.gen_ai_mirror.Config") as mock_cfg:
         root = MagicMock()
         root.config = cfg
         mock_cfg.return_value = root
@@ -250,7 +250,7 @@ def test_gen_ai_mirroring_span_set_attribute_swallows_mirror_errors(mock_gen_ai_
     inner.start_as_current_span.return_value = inner_cm
     tracer = GenAiMirroringTracer(inner)
     with patch(
-        "agent_trace.instrumentation.mcp.gen_ai_mirror.mirror_traceloop_to_gen_ai",
+        "harness_sdk.instrumentation.mcp.gen_ai_mirror.mirror_traceloop_to_gen_ai",
         side_effect=ValueError("boom"),
     ):
         with tracer.start_as_current_span("s") as span:

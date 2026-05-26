@@ -1,11 +1,36 @@
+import json
+
+import aiohttp
 import flask
 import pytest
-import json
-import aiohttp
 from flask import Flask
+from opentelemetry.trace import SpanKind
 
+from harness_sdk.instrumentation.instrumentation_definitions import (
+    AIOHTTP_CLIENT_KEY,
+    FLASK_KEY,
+    SUPPORTED_LIBRARIES,
+    _uninstrument_all,
+)
 from test import setup_custom_logger
-from test.agent_trace.agent.instrumentation.flask.app import FlaskServer
+from test.instrumentation.flask.app import FlaskServer
+
+_SKIP_LIBRARIES = [key for key in SUPPORTED_LIBRARIES if key not in (FLASK_KEY, AIOHTTP_CLIENT_KEY)]
+
+
+def _aiohttp_client_span(spans, port):
+    for span in spans:
+        if span.kind != SpanKind.CLIENT:
+            continue
+        attrs = span.attributes or {}
+        url = attrs.get("http.url", "")
+        if (
+            attrs.get("http.method") == "POST"
+            and f"localhost:{port}/route1" in url
+            and "http.request.body" in attrs
+        ):
+            return span
+    return None
 
 
 @pytest.mark.asyncio
@@ -23,30 +48,44 @@ async def test_aiohttp_post(agent, exporter):
 
     server = FlaskServer(app)
     server.start()
-    agent.instrument(app)
+    try:
+        _uninstrument_all()
+        exporter.clear()
+        agent.instrument(app, skip_libraries=_SKIP_LIBRARIES)
+        exporter.clear()
 
-    # Make test call
-    async with aiohttp.ClientSession() as session:
-        async with session.post(f'http://localhost:{server.port}/route1', data='{ "a":"b", "c": "d" }',
-                                headers={'tester1': 'tester1', 'tester2': 'tester2', 'content-type': 'application/json'}) as response:
-            response_body = await response.json()
-            logger.info('Received: %s', str(response_body))
-            a = response_body['a']
-            assert a == 'a'
-            span_list = exporter.get_finished_spans()
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f'http://localhost:{server.port}/route1',
+                data='{ "a":"b", "c": "d" }',
+                headers={
+                    'tester1': 'tester1',
+                    'tester2': 'tester2',
+                    'content-type': 'application/json',
+                },
+            ) as response:
+                response_body = await response.json()
+                logger.info('Received: %s', str(response_body))
+                assert response_body['a'] == 'a'
 
-            assert span_list
+                span_list = exporter.get_finished_spans()
+                assert span_list
 
-            assert len(span_list) == 3
-            aiohttpSpanAsObject = json.loads(span_list[2].to_json())
+                client_span = _aiohttp_client_span(span_list, server.port)
+                assert client_span is not None, (
+                    f"no aiohttp client span in {[s.name for s in span_list]}"
+                )
+                aiohttp_span = json.loads(client_span.to_json())
 
-            assert aiohttpSpanAsObject['attributes']['http.method'] == 'POST'
-            assert aiohttpSpanAsObject['attributes']['http.url'] == f'http://localhost:{server.port}/route1'
-            assert aiohttpSpanAsObject['attributes']['http.request.header.tester1'] == 'tester1'
-            assert aiohttpSpanAsObject['attributes']['http.request.header.tester2'] == 'tester2'
-            assert aiohttpSpanAsObject['attributes']['http.request.body'] == '{ "a":"b", "c": "d" }'
-            assert aiohttpSpanAsObject['attributes']['http.response.header.content-type'] == 'application/json'
-            assert aiohttpSpanAsObject['attributes']['http.response.body'] == '{ "a": "a", "xyz": "xyz" }'
-
-            assert aiohttpSpanAsObject['attributes']['http.status_code'] == 200
-            server.shutdown()
+                assert aiohttp_span['attributes']['http.method'] == 'POST'
+                assert aiohttp_span['attributes']['http.url'] == (
+                    f'http://localhost:{server.port}/route1'
+                )
+                assert aiohttp_span['attributes']['http.request.header.tester1'] == 'tester1'
+                assert aiohttp_span['attributes']['http.request.header.tester2'] == 'tester2'
+                assert aiohttp_span['attributes']['http.request.body'] == '{ "a":"b", "c": "d" }'
+                assert aiohttp_span['attributes']['http.response.header.content-type'] == 'application/json'
+                assert aiohttp_span['attributes']['http.response.body'] == '{ "a": "a", "xyz": "xyz" }'
+                assert aiohttp_span['attributes']['http.status_code'] == 200
+    finally:
+        server.shutdown()

@@ -1,3 +1,4 @@
+from test.control_test_helpers import AlwaysBlockControlPlugin
 """Tests for LiteLLM instrumentation (gen_ai spans + evaluate_agent_span)."""
 
 from unittest.mock import patch
@@ -9,10 +10,9 @@ pytest.importorskip("litellm")
 import litellm
 from litellm.types.utils import EmbeddingResponse, ModelResponse
 
-from agent_trace.filter.registry import Registry
-from agent_trace.filter.traceable import LibtraceableProcessResult
-from agent_trace.gen_ai.exceptions import TraceableEvaluationBlocked
-from agent_trace.instrumentation.litellm import LiteLLMInstrumentorWrapper
+from harness_sdk.plugins.control import ControlResult, get_control_registry
+from harness_sdk.gen_ai.exceptions import ControlEvaluationBlocked
+from harness_sdk.instrumentation.litellm import LiteLLMInstrumentorWrapper
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def litellm_instrumentor():
     yield wrapper
     if getattr(wrapper, "_applied", False):
         wrapper.uninstrument()
-    Registry().filter = None
+    get_control_registry().clear()
 
 
 def _fake_model_response(*_args, **_kwargs):
@@ -45,14 +45,6 @@ def _fake_embedding_response(*_args, **_kwargs):
         data=[{"embedding": [0.1, 0.2, 0.3], "index": 0, "object": "embedding"}],
         usage={"prompt_tokens": 4, "total_tokens": 4},
     )
-
-
-class _AlwaysBlockGenAiFilter:
-    def evaluate_agent_span(self, span, body=""):  # pylint: disable=unused-argument
-        res = LibtraceableProcessResult(None)
-        res.block = True
-        res.response_message = "blocked"
-        return res
 
 
 def _request_span(spans):
@@ -88,11 +80,11 @@ def test_litellm_evaluate_blocks_before_wrapped(agent, exporter, litellm_instrum
         calls["n"] += 1
         return _fake_model_response()
 
-    Registry().register(_AlwaysBlockGenAiFilter)
+    get_control_registry().register(AlwaysBlockControlPlugin())
 
-    with patch("litellm.completion", new=counting_fake):
+    with patch("litellm.main.completion", new=counting_fake):
         litellm_instrumentor.instrument()
-        with pytest.raises(TraceableEvaluationBlocked):
+        with pytest.raises(ControlEvaluationBlocked):
             litellm.completion(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": "hi"}],
@@ -154,8 +146,8 @@ def test_litellm_double_instrument_is_noop(agent, exporter, litellm_instrumentor
 def test_litellm_gen_ai_disabled_passthrough(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
     import os
 
-    os.environ["TA_GEN_AI_ENABLED"] = "false"
-    from agent_trace.config.config import Config
+    os.environ["HA_GEN_AI_ENABLED"] = "false"
+    from harness_sdk.config.config import Config
 
     Config._instance = None
 
@@ -165,9 +157,11 @@ def test_litellm_gen_ai_disabled_passthrough(agent, exporter, litellm_instrument
         calls["n"] += 1
         return _fake_model_response()
 
-    with patch("litellm.completion", new=counting_fake):
+    with patch("litellm.main.completion", new=counting_fake):
         litellm_instrumentor.instrument()
-        litellm.completion(
+        import litellm.main as litellm_main
+
+        litellm_main.completion(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": "hi"}],
         )

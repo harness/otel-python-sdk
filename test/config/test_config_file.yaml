@@ -1,0 +1,24 @@
+opa:
+  enabled: true
+  endpoint: http://localhost:8181/my_opa_endpoint
+  poll_period_seconds: 31
+blocking_config:
+  enabled: true
+  debug_log: true
+  evaluate_body: true
+  modsecurity:
+    enabled: true
+  regionBlocking:
+    enabled: true
+  skip_internal_request: false
+  max_recursion_depth: 25
+remote_config:
+  enabled: true
+  endpoint: http://localhost:5441/remote_config_endpoint
+  poll_period_seconds: 29
+
+gen_ai:
+  enabled: false
+  payload_capture_enabled: false
+  payload_evaluation_enabled: true
+

@@ -5,7 +5,7 @@ from fastapi import FastAPI, Body
 from fastapi.testclient import TestClient
 from starlette.responses import JSONResponse
 
-from agent_trace.instrumentation.instrumentation_definitions import FAST_API_KEY, _INSTRUMENTATION_STATE
+from harness_sdk.instrumentation.instrumentation_definitions import FAST_API_KEY, _INSTRUMENTATION_STATE
 
 def create_instrumented_fast_app(agent):
     if FAST_API_KEY in _INSTRUMENTATION_STATE:

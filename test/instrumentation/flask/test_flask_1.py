@@ -6,7 +6,7 @@ from flask import Flask
 from test import setup_custom_logger, find_free_port
 
 # @pytest.mark.serial
-from test.agent_trace.agent.instrumentation.flask.app import FlaskServer
+from test.instrumentation.flask.app import FlaskServer
 
 def test_run(agent, exporter):
     logger = setup_custom_logger(__name__)

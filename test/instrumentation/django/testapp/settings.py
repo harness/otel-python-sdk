@@ -33,12 +33,8 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
 ]
 
 MIDDLEWARE = [
@@ -46,12 +42,10 @@ MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-ROOT_URLCONF = 'test.agent_trace.agent.instrumentation.django.testapp.urls'
+ROOT_URLCONF = 'test.instrumentation.django.testapp.urls'
 
 TEMPLATES = [
     {
@@ -69,7 +63,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'test.agent_trace.agent.instrumentation.django.testapp.wsgi.application'
+WSGI_APPLICATION = 'test.instrumentation.django.testapp.wsgi.application'
 
 
 # Database

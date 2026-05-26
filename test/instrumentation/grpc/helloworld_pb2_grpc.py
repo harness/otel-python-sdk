@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from test.agent_trace.agent.instrumentation.grpc import helloworld_pb2 as helloworld__pb2
+from test.instrumentation.grpc import helloworld_pb2 as helloworld__pb2
 
 GRPC_GENERATED_VERSION = '1.63.0.dev0'
 GRPC_VERSION = grpc.__version__

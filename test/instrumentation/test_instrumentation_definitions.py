@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agent_trace.instrumentation.instrumentation_definitions import (
+from harness_sdk.instrumentation.instrumentation_definitions import (
     _GENERIC_INSTRUMENTATION_STATE,
     _INSTRUMENTATION_STATE,
     _WRAPPER_MODULE_AND_CLASS,
@@ -43,8 +43,8 @@ def test_normalize_handles_underscores():
 # --- _get_normalized_skip_libraries ---
 
 def test_get_normalized_skip_libraries():
-    result = _get_normalized_skip_libraries(["Flask", "aws-lambda", "grpc:client"])
-    assert result == {"flask", "awslambda", "grpcclient"}
+    result = _get_normalized_skip_libraries(["Flask", "openai", "grpc:client"])
+    assert result == {"flask", "openai", "grpcclient"}
 
 
 # --- _get_wrapper_normalized_names ---
@@ -56,7 +56,6 @@ def test_get_wrapper_normalized_names_includes_all_wrapper_keys():
 
 def test_get_wrapper_normalized_names_includes_aliases():
     result = _get_wrapper_normalized_names()
-    assert "awslambda" in result
     assert "psycopg2" in result
     assert "grpc" in result
 
@@ -69,7 +68,7 @@ def test_get_contrib_entry_points_uses_select_when_available():
     mock_entry_points = MagicMock()
     mock_entry_points.select.return_value = [mock_ep]
 
-    with patch("agent_trace.instrumentation.instrumentation_definitions.importlib_metadata.entry_points",
+    with patch("harness_sdk.instrumentation.instrumentation_definitions.importlib_metadata.entry_points",
                return_value=mock_entry_points):
         result = _get_contrib_instrumentation_entry_points()
 
@@ -83,14 +82,14 @@ def test_get_contrib_entry_points_falls_back_to_get():
     legacy_entry_points = {"opentelemetry_instrumentor": [mock_ep]}
     assert not hasattr(legacy_entry_points, "select")
 
-    with patch("agent_trace.instrumentation.instrumentation_definitions.importlib_metadata.entry_points",
+    with patch("harness_sdk.instrumentation.instrumentation_definitions.importlib_metadata.entry_points",
                return_value=legacy_entry_points):
         result = _get_contrib_instrumentation_entry_points()
 
     assert result == [mock_ep]
 
 def test_get_contrib_entry_points_returns_empty_on_exception():
-    with patch("agent_trace.instrumentation.instrumentation_definitions.importlib_metadata.entry_points",
+    with patch("harness_sdk.instrumentation.instrumentation_definitions.importlib_metadata.entry_points",
                side_effect=Exception("boom")):
         result = _get_contrib_instrumentation_entry_points()
 
@@ -131,7 +130,7 @@ def _make_entry_point(name):
 def test_instrument_skips_wrapper_covered_libraries():
     flask_ep = _make_entry_point("flask")
 
-    with patch("agent_trace.instrumentation.instrumentation_definitions._get_contrib_instrumentation_entry_points",
+    with patch("harness_sdk.instrumentation.instrumentation_definitions._get_contrib_instrumentation_entry_points",
                return_value=[flask_ep]):
         instrument_supported_contrib_without_wrapper()
 
@@ -140,16 +139,30 @@ def test_instrument_skips_wrapper_covered_libraries():
 def test_instrument_skips_alias_covered_libraries():
     psycopg2_ep = _make_entry_point("psycopg2")
 
-    with patch("agent_trace.instrumentation.instrumentation_definitions._get_contrib_instrumentation_entry_points",
+    with patch("harness_sdk.instrumentation.instrumentation_definitions._get_contrib_instrumentation_entry_points",
                return_value=[psycopg2_ep]):
         instrument_supported_contrib_without_wrapper()
 
     assert "psycopg2" not in _GENERIC_INSTRUMENTATION_STATE
 
+
+def test_instrument_skips_denylisted_libraries():
+    aws_lambda_ep = _make_entry_point("aws-lambda")
+    aiobotocore_ep = _make_entry_point("aiobotocore")
+
+    with patch("harness_sdk.instrumentation.instrumentation_definitions._get_contrib_instrumentation_entry_points",
+               return_value=[aws_lambda_ep, aiobotocore_ep]):
+        instrument_supported_contrib_without_wrapper()
+
+    aws_lambda_ep.load.assert_not_called()
+    aiobotocore_ep.load.assert_not_called()
+    assert "aws-lambda" not in _GENERIC_INSTRUMENTATION_STATE
+    assert "aiobotocore" not in _GENERIC_INSTRUMENTATION_STATE
+
 def test_instrument_skips_skip_libraries():
     ep = _make_entry_point("redis")
 
-    with patch("agent_trace.instrumentation.instrumentation_definitions._get_contrib_instrumentation_entry_points",
+    with patch("harness_sdk.instrumentation.instrumentation_definitions._get_contrib_instrumentation_entry_points",
                return_value=[ep]):
         instrument_supported_contrib_without_wrapper(skip_libraries=["redis"])
 
@@ -160,7 +173,7 @@ def test_instrument_skips_already_instrumented():
     _GENERIC_INSTRUMENTATION_STATE["redis"] = original
     ep = _make_entry_point("redis")
 
-    with patch("agent_trace.instrumentation.instrumentation_definitions._get_contrib_instrumentation_entry_points",
+    with patch("harness_sdk.instrumentation.instrumentation_definitions._get_contrib_instrumentation_entry_points",
                return_value=[ep]):
         instrument_supported_contrib_without_wrapper()
 
@@ -174,7 +187,7 @@ def test_instrument_instruments_unknown_library():
     ep = _make_entry_point("redis")
     ep.load.return_value = mock_class
 
-    with patch("agent_trace.instrumentation.instrumentation_definitions._get_contrib_instrumentation_entry_points",
+    with patch("harness_sdk.instrumentation.instrumentation_definitions._get_contrib_instrumentation_entry_points",
                return_value=[ep]):
         instrument_supported_contrib_without_wrapper()
 
@@ -184,9 +197,9 @@ def test_instrument_instruments_unknown_library():
 def test_instrument_skip_libraries_normalizes_names():
     ep = _make_entry_point("my-redis")
 
-    with patch("agent_trace.instrumentation.instrumentation_definitions._get_contrib_instrumentation_entry_points",
+    with patch("harness_sdk.instrumentation.instrumentation_definitions._get_contrib_instrumentation_entry_points",
                return_value=[ep]), \
-         patch("agent_trace.instrumentation.instrumentation_definitions._instrument_generic_contrib_library") as mock_instr:
+         patch("harness_sdk.instrumentation.instrumentation_definitions._instrument_generic_contrib_library") as mock_instr:
         instrument_supported_contrib_without_wrapper(skip_libraries=["My_Redis"])
 
     mock_instr.assert_not_called()
@@ -219,3 +232,28 @@ def test_uninstrument_all_tolerates_missing_uninstrument():
 
     assert len(_INSTRUMENTATION_STATE) == 0
     assert len(_GENERIC_INSTRUMENTATION_STATE) == 0
+
+
+def test_uninstrument_all_tolerates_uninstrument_exceptions():
+    broken = MagicMock()
+    broken.uninstrument.side_effect = AttributeError("no _wrapped_module_name")
+    _GENERIC_INSTRUMENTATION_STATE["aws-lambda"] = broken
+
+    _uninstrument_all()  # should not raise
+
+    broken.uninstrument.assert_called_once()
+    assert len(_GENERIC_INSTRUMENTATION_STATE) == 0
+
+
+def test_instrument_generic_contrib_library_skips_noop_instrument():
+    mock_instance = MagicMock()
+    mock_instance._is_instrumented_by_opentelemetry = False
+    mock_class = MagicMock(return_value=mock_instance)
+    mock_ep = MagicMock()
+    mock_ep.name = "noop-library"
+    mock_ep.load.return_value = mock_class
+
+    _instrument_generic_contrib_library(mock_ep)
+
+    mock_instance.instrument.assert_called_once()
+    assert "noop-library" not in _GENERIC_INSTRUMENTATION_STATE

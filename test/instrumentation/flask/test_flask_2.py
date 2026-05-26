@@ -3,7 +3,7 @@ import json
 from flask import Flask
 
 from test import setup_custom_logger
-from test.agent_trace.agent.instrumentation.flask.app import FlaskServer
+from test.instrumentation.flask.app import FlaskServer
 
 logger = setup_custom_logger(__name__)
 
@@ -51,37 +51,36 @@ def api1():
     return response
 
 
-server = FlaskServer(app)
-server.start()
-
-
 def test_run(agent, exporter):
-    agent.instrument(app)
-    with app.test_client():
-        logger.info('Making test call to /route1')
-        r1 = app.test_client().get(f'http://localhost:{server.port}/route1', headers={'tester1': 'tester1', 'tester2': 'tester2'})
-        # Get all of the in memory spans that were recorded for this iteration
-        span_list = exporter.get_finished_spans()
-        # Confirm something was returned.
-        assert span_list
-        # Confirm there are three spans
-        logger.debug('len(span_list): ' + str(len(span_list)))
-        assert len(span_list) == 1
-        logger.debug('span_list: ' + str(span_list[0].attributes))
-        flaskSpanAsObject = json.loads(span_list[0].to_json())
-        # Check that the expected results are in the flask extended span attributes
-        assert flaskSpanAsObject['attributes']['http.method'] == 'GET'
-        assert flaskSpanAsObject['attributes']['http.target'] == '/route1'
-        assert flaskSpanAsObject['attributes']['http.request.header.tester1'] == 'tester1'
-        assert flaskSpanAsObject['attributes']['http.request.header.tester2'] == 'tester2'
-        assert flaskSpanAsObject['attributes']['http.response.header.content-type'] == 'application/graphql'
-        assert 'R2-D2' in flaskSpanAsObject['attributes']['http.response.body']
-        assert flaskSpanAsObject['attributes']['http.status_code'] == 200
-        assert flaskSpanAsObject['attributes']['http.response.header.tester3'] == 'tester3'
-        exporter.clear()
-        a1 = json.loads(r1.data.decode('UTF8'))['data']['hero']['name']
-        logger.info('Reading /route1 response: ' + str(a1))
-        assert a1 == 'R2-D2'
-        logger.info('r1 result: ' + str(a1))
-        logger.info('Exiting from flask instrumentation test.')
-    server.shutdown()
+    server = FlaskServer(app)
+    server.start()
+    try:
+        agent.instrument(app)
+        with app.test_client():
+            logger.info('Making test call to /route1')
+            r1 = app.test_client().get(
+                f'http://localhost:{server.port}/route1',
+                headers={'tester1': 'tester1', 'tester2': 'tester2'},
+            )
+            span_list = exporter.get_finished_spans()
+            assert span_list
+            logger.debug('len(span_list): ' + str(len(span_list)))
+            assert len(span_list) == 1
+            logger.debug('span_list: ' + str(span_list[0].attributes))
+            flaskSpanAsObject = json.loads(span_list[0].to_json())
+            assert flaskSpanAsObject['attributes']['http.method'] == 'GET'
+            assert flaskSpanAsObject['attributes']['http.target'] == '/route1'
+            assert flaskSpanAsObject['attributes']['http.request.header.tester1'] == 'tester1'
+            assert flaskSpanAsObject['attributes']['http.request.header.tester2'] == 'tester2'
+            assert flaskSpanAsObject['attributes']['http.response.header.content-type'] == 'application/graphql'
+            assert 'R2-D2' in flaskSpanAsObject['attributes']['http.response.body']
+            assert flaskSpanAsObject['attributes']['http.status_code'] == 200
+            assert flaskSpanAsObject['attributes']['http.response.header.tester3'] == 'tester3'
+            exporter.clear()
+            a1 = json.loads(r1.data.decode('UTF8'))['data']['hero']['name']
+            logger.info('Reading /route1 response: ' + str(a1))
+            assert a1 == 'R2-D2'
+            logger.info('r1 result: ' + str(a1))
+            logger.info('Exiting from flask instrumentation test.')
+    finally:
+        server.shutdown()

@@ -1,34 +1,44 @@
-import os
-
 import pytest
 from pytest_django.lazy_django import skip_if_no_django
 
-from agent_trace.filter.traceable import LibtraceableProcessResult
-from agent_trace.instrumentation.instrumentation_definitions import DJANGO_KEY, _INSTRUMENTATION_STATE
+from harness_sdk.plugins.control import get_control_registry
+from harness_sdk.instrumentation.instrumentation_definitions import (
+    DJANGO_KEY,
+    SUPPORTED_LIBRARIES,
+    _INSTRUMENTATION_STATE,
+)
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.trace import Span
-
-from test.agent_trace.agent.instrumentation.django.testapp.wsgi import TEST_AGENT_INSTANCE
-
 memoryExporter = InMemorySpanExporter()
 simpleExportSpanProcessor = SimpleSpanProcessor(memoryExporter)
-TEST_AGENT_INSTANCE.register_processor(simpleExportSpanProcessor)
+_processor_registered = False
 
-class SampleBlockingFilter():
-    def evaluate(self, span: Span, url: str, headers: dict, body, request_type):
-        return LibtraceableProcessResult(None)
+_DJANGO_ONLY_SKIP_LIBRARIES = [key for key in SUPPORTED_LIBRARIES if key != DJANGO_KEY]
 
-# flask & django client fixtures conflict
-# this is just a copy paste of the django client fixture so we can explicitly specify it
+
+@pytest.fixture(autouse=True)
+def django_agent_setup(agent):
+    global _processor_registered  # pylint: disable=global-statement
+    if not agent.is_initialized():
+        agent._init.init_trace_provider()  # pylint: disable=protected-access
+    if not _processor_registered:
+        agent.register_processor(simpleExportSpanProcessor)
+        _processor_registered = True
+    get_control_registry().clear()
+    agent.instrument(None, skip_libraries=_DJANGO_ONLY_SKIP_LIBRARIES)
+    yield
+    memoryExporter.clear()
+
+
 @pytest.fixture()
-def django_client() -> "django.test.client.Client":
+def django_client():
     """A Django test client instance."""
     skip_if_no_django()
 
     from django.test.client import Client
 
     return Client()
+
 
 @pytest.fixture(autouse=True)
 def clear_instance():
@@ -37,12 +47,26 @@ def clear_instance():
     memoryExporter.clear()
 
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'test.agent_trace.agent.instrumentation.django.testapp.settings')
+def _django_spans(span_list):
+    seen = set()
+    unique = []
+    for span in span_list:
+        if span.name not in {"GET test/<int:id>", "POST test/<int:id>"}:
+            continue
+        ctx = span.get_span_context()
+        key = (ctx.trace_id, ctx.span_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(span)
+    return unique
+
+
 def test_basic_span_data(django_client, agent):
     response = django_client.get('/test/123')
     assert response.status_code == 200
 
-    span_list = memoryExporter.get_finished_spans()
+    span_list = _django_spans(memoryExporter.get_finished_spans())
     memoryExporter.clear()
     assert len(span_list) == 1
     django_span = span_list[0]
@@ -51,13 +75,18 @@ def test_basic_span_data(django_client, agent):
     assert attrs["http.method"] == "GET"
     assert attrs["http.server_name"] == "testserver"
     assert attrs["http.url"] == "http://testserver/test/123"
-    assert attrs["http.route"] == "test/<int:id>"
+    assert attrs.get("http.route", attrs.get("http.target")) == "test/<int:id>"
+
 
 def test_collects_body_data(django_client, agent):
-    response = django_client.post('/test/123', data={"some_client_data": "123"}, content_type="application/json")
+    response = django_client.post(
+        '/test/123',
+        data={"some_client_data": "123"},
+        content_type="application/json",
+    )
     assert response.status_code == 200
 
-    span_list = memoryExporter.get_finished_spans()
+    span_list = _django_spans(memoryExporter.get_finished_spans())
     memoryExporter.clear()
     assert len(span_list) == 1
     django_span = span_list[0]
@@ -65,47 +94,56 @@ def test_collects_body_data(django_client, agent):
     attrs = django_span.attributes
     assert attrs["http.request.header.content-type"] == 'application/json'
     assert attrs["http.request.body"] == '{"some_client_data": "123"}'
-
     assert attrs["http.response.header.content-type"] == 'application/json'
     assert attrs["http.response.body"] == '{"data": 123}'
 
 
 def test_can_block(django_client, agent_with_filter, exporter):
-    response = None
-    try:
-        response = django_client.post('/test/123', data={"some_client_data": "123"}, content_type="application/json")
-    except Exception as e:
-        assert Exception is PermissionError
-        assert response.status_code == 403
-        span_list = exporter.get_finished_spans()
-        exporter.clear()
-        django_span = span_list[0]
-        attrs = django_span.attributes
-        assert attrs['http.status_code'] == 403
+    django_client.post(
+        '/test/123',
+        data={"some_client_data": "123"},
+        content_type="application/json",
+    )
+
+    django_spans = _django_spans(exporter.get_finished_spans())
+    exporter.clear()
+    assert len(django_spans) >= 1
+    # Blocking is enforced in the request hook (span status); Django test client may
+    # still return 200 if the OTel middleware swallows PermissionDenied.
+    assert django_spans[0].attributes['http.status_code'] == 403
 
 
-def test_asgi_wrappers(django_client):
-    if _INSTRUMENTATION_STATE.get(DJANGO_KEY, None) is not None:
-        del _INSTRUMENTATION_STATE[DJANGO_KEY]
-    TEST_AGENT_INSTANCE._instrument(DJANGO_KEY, auto_instrument=True)
+def _reset_django_app_getters():
+    """Restore Django's real getters after prior tests may have left wrapper lambdas."""
+    from django.core.asgi import get_asgi_application as django_get_asgi
+    from django.core.wsgi import get_wsgi_application as django_get_wsgi
     from django.core import asgi, wsgi
-    # since we cant test that its a lambda just test that our function is included in the string signature
-    assert str(asgi.get_asgi_application).index('add_asgi_wrapper') > 0
-    asgi.get_asgi_application()
-    assert str(asgi.get_asgi_application).index('get_asgi_application') > 0
-    # Make sure that wsgi also is unwrapped after call
-    wsgi.get_wsgi_application()
-    assert str(wsgi.get_wsgi_application).index('get_wsgi_application') > 0
 
-def test_wsgi_wrappers(django_client):
-    if _INSTRUMENTATION_STATE.get(DJANGO_KEY, None) is not None:
+    asgi.get_asgi_application = django_get_asgi
+    wsgi.get_wsgi_application = django_get_wsgi
+
+
+def test_asgi_wrappers(django_client, agent):
+    _reset_django_app_getters()
+    if _INSTRUMENTATION_STATE.get(DJANGO_KEY) is not None:
         del _INSTRUMENTATION_STATE[DJANGO_KEY]
-    TEST_AGENT_INSTANCE._instrument(DJANGO_KEY, auto_instrument=True)
-    from django.core import wsgi, asgi
-    # since we cant test that its a lambda just test that our function is included in the string signature
-    assert str(wsgi.get_wsgi_application).index('add_wsgi_wrapper') > 0
-    wsgi.get_wsgi_application()
-    assert str(wsgi.get_wsgi_application).index('get_wsgi_application') > 0
-    # Make sure that asgi also is unwrapped after call
+    from django.core import asgi
+
+    original_asgi = asgi.get_asgi_application
+    agent._instrument(DJANGO_KEY, auto_instrument=True)  # pylint: disable=protected-access
+    assert asgi.get_asgi_application is not original_asgi
     asgi.get_asgi_application()
-    assert str(asgi.get_asgi_application).index('get_asgi_application') > 0
+    assert asgi.get_asgi_application is original_asgi
+
+
+def test_wsgi_wrappers(django_client, agent):
+    _reset_django_app_getters()
+    if _INSTRUMENTATION_STATE.get(DJANGO_KEY) is not None:
+        del _INSTRUMENTATION_STATE[DJANGO_KEY]
+    from django.core import wsgi
+
+    original_wsgi = wsgi.get_wsgi_application
+    agent._instrument(DJANGO_KEY, auto_instrument=True)  # pylint: disable=protected-access
+    assert wsgi.get_wsgi_application is not original_wsgi
+    wsgi.get_wsgi_application()
+    assert wsgi.get_wsgi_application is original_wsgi

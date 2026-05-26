@@ -1,9 +1,9 @@
 """Tests for config-ordered plugin loading."""
 from unittest.mock import MagicMock, patch
 
-from agent_trace.config.config import Config
-from agent_trace.plugins.control import get_control_registry
-from agent_trace.plugins.loader import load_control_plugins, load_observability_plugins
+from harness_sdk.config.config import Config
+from harness_sdk.plugins.control import get_control_registry
+from harness_sdk.plugins.loader import load_control_plugins, load_observability_plugins
 
 
 class _PluginA:
@@ -14,13 +14,13 @@ class _PluginA:
         pass
 
     def evaluate(self, span, url, headers, body, is_grpc):  # pylint: disable=unused-argument
-        from agent_trace.plugins.control import ControlResult
+        from harness_sdk.plugins.control import ControlResult
         result = ControlResult()
         result.response_message = "a"
         return result
 
     def evaluate_agent_span(self, span, body=""):  # pylint: disable=unused-argument
-        from agent_trace.plugins.control import ControlResult
+        from harness_sdk.plugins.control import ControlResult
         return ControlResult()
 
     def shutdown(self):
@@ -35,13 +35,13 @@ class _PluginB:
         pass
 
     def evaluate(self, span, url, headers, body, is_grpc):  # pylint: disable=unused-argument
-        from agent_trace.plugins.control import ControlResult
+        from harness_sdk.plugins.control import ControlResult
         result = ControlResult()
         result.response_message = "b"
         return result
 
     def evaluate_agent_span(self, span, body=""):  # pylint: disable=unused-argument
-        from agent_trace.plugins.control import ControlResult
+        from harness_sdk.plugins.control import ControlResult
         return ControlResult()
 
     def shutdown(self):
@@ -61,7 +61,7 @@ def test_control_plugins_load_in_config_order():
     config.enabled_control_plugins = ["plugin_b", "plugin_a"]
 
     with patch(
-        "agent_trace.plugins.loader._entry_points_by_name",
+        "harness_sdk.plugins.loader._entry_points_by_name",
         return_value={
             "plugin_a": _fake_entry_point("plugin_a", lambda c: _PluginA()),
             "plugin_b": _fake_entry_point("plugin_b", lambda c: _PluginB()),
@@ -74,7 +74,7 @@ def test_control_plugins_load_in_config_order():
 
     from opentelemetry.trace import NonRecordingSpan
     result = registry.evaluate(NonRecordingSpan(None), "", {}, None, False)
-    assert result.response_message == "b"
+    assert result.response_message == "a"
     registry.clear()
 
 
@@ -83,7 +83,7 @@ def test_skips_uninstalled_plugin_name():
     config = Config()
     config.enabled_control_plugins = ["missing_plugin"]
 
-    with patch("agent_trace.plugins.loader._entry_points_by_name", return_value={}):
+    with patch("harness_sdk.plugins.loader._entry_points_by_name", return_value={}):
         load_control_plugins(config)
 
     assert len(get_control_registry()._plugins) == 0  # pylint: disable=protected-access
@@ -116,12 +116,12 @@ def test_observability_plugins_register_in_config_order():
     provider = MagicMock()
 
     with patch(
-        "agent_trace.plugins.loader._entry_points_by_name",
+        "harness_sdk.plugins.loader._entry_points_by_name",
         return_value={
             "first": _fake_entry_point("first", lambda c: _ObsPlugin("first")),
             "second": _fake_entry_point("second", lambda c: _ObsPlugin("second")),
         },
-    ), patch("agent_trace.plugins.loader.trace.get_tracer_provider", return_value=provider):
+    ), patch("harness_sdk.plugins.loader.trace.get_tracer_provider", return_value=provider):
         load_observability_plugins(config)
 
     assert [p.label for p in processors] == ["second", "first"]

@@ -1,19 +1,16 @@
 """
 WSGI config for testapp project.
 
-It exposes the WSGI callable as a module-level variable named ``application``.
-
-For more information on this file, see
-https://docs.djangoproject.com/en/3.2/howto/deployment/wsgi/
+Agent initialization is deferred to pytest fixtures (see ``test_django_1.py``).
 """
-
 import os
 
 from django.core.wsgi import get_wsgi_application
 
-from agent_trace.agent import Agent
+os.environ.setdefault("HA_ENABLE_CONSOLE_SPAN_EXPORTER", "true")
+os.environ.setdefault(
+    "DJANGO_SETTINGS_MODULE",
+    "test.instrumentation.django.testapp.settings",
+)
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'test.agent_trace.agent.instrumentation.django.testapp.settings')
-TEST_AGENT_INSTANCE = Agent()
-TEST_AGENT_INSTANCE.instrument()
 application = get_wsgi_application()

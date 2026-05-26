@@ -1,7 +1,7 @@
 import flask
 import json
 from test import setup_custom_logger
-from test.agent_trace.agent.instrumentation.flask.app import FlaskServer
+from test.instrumentation.flask.app import FlaskServer
 
 logger = setup_custom_logger(__name__)
 
