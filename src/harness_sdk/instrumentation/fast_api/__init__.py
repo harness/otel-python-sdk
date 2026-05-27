@@ -67,7 +67,15 @@ async def replaced_ot_middleware_call(self, scope, receive, send):  # pylint:dis
                 # returns None; the real LibtraceableProcessResult is stored on Registry by apply_filter.
                 self.server_request_hook(span, scope, body)
                 control_result = get_control_registry().last_evaluate_result()
-                should_forward_to_handler = control_result.block is not True
+                should_forward_to_handler = not bool(control_result.block)
+                logger.debug(
+                    "fastapi control decision: url=%s block=%s forward_to_handler=%s status=%s message=%r",
+                    url,
+                    control_result.block,
+                    should_forward_to_handler,
+                    control_result.response_status_code,
+                    control_result.response_message,
+                )
 
             @wraps(receive)
             async def wrapped_receive():

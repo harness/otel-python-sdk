@@ -6,6 +6,10 @@ from typing import Any, List, Optional, Protocol, runtime_checkable
 
 from opentelemetry.trace import Span
 
+from harness_sdk.custom_logger import get_custom_logger
+
+logger = get_custom_logger(__name__)
+
 
 @dataclass
 class ControlResult:
@@ -95,6 +99,14 @@ class ControlRegistry:
         for plugin in self._plugins:
             result = plugin.evaluate(span, url, headers, body, is_grpc)
             self._last_result = result
+            logger.debug(
+                "control registry evaluate: plugin=%s url=%s block=%s status=%s message=%r",
+                getattr(plugin, "name", type(plugin).__name__),
+                url,
+                result.block,
+                result.response_status_code,
+                result.response_message,
+            )
             if result.block:
                 return result
         self._last_result = result
