@@ -9,9 +9,6 @@ description = "Harness Python SDK with instrumentation and plugin architecture"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
-classifiers = [
-    "License :: OSI Approved :: Apache Software License",
-]
 dependencies = [
     "opentelemetry-api==1.41.1",
     "opentelemetry-exporter-otlp==1.41.1",
