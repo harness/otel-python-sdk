@@ -7,7 +7,11 @@ name = "harness-sdk"
 version = "0.1.0"
 description = "Harness Python SDK with instrumentation and plugin architecture"
 readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.10"
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+]
 dependencies = [
     "opentelemetry-api==1.41.1",
     "opentelemetry-exporter-otlp==1.41.1",
@@ -71,6 +75,9 @@ harness-instrument = "harness_sdk.autoinstrumentation.wrapper:run"
 [project.entry-points.harness_sdk_observability_plugin]
 builtin_pipeline = "harness_sdk.plugins.builtin.pipeline:factory"
 builtin_span_attributes = "harness_sdk.plugins.builtin.span_attributes:factory"
+
+[tool.setuptools]
+license-files = ["LICENSE.md", "NOTICE.md"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
