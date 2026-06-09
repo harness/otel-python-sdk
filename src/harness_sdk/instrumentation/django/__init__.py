@@ -5,6 +5,11 @@ import traceback
 from django.conf import settings  # pylint:disable=C0415
 from django.http import HttpResponse  # pylint:disable=C0415
 from opentelemetry.instrumentation.django import DjangoInstrumentor
+from opentelemetry.instrumentation.django.middleware.otel_middleware import (
+    _DjangoMiddleware,
+)
+from opentelemetry.instrumentation.wsgi import collect_request_attributes
+from opentelemetry.semconv._incubating.attributes.http_attributes import HTTP_TARGET
 from opentelemetry.trace import Span
 
 from harness_sdk import constants
@@ -35,14 +40,6 @@ class BlockingMiddleware:
         return self.get_response(request)
 
 
-def _http_target(request) -> str:
-    target = request.path
-    query_string = request.META.get('QUERY_STRING', '')
-    if query_string:
-        target = f"{target}?{query_string}"
-    return target
-
-
 def _install_blocking_middleware():
     if _BLOCKING_MIDDLEWARE_PATH in settings.MIDDLEWARE:
         return
@@ -58,6 +55,32 @@ def _install_blocking_middleware():
         settings.MIDDLEWARE.insert(otel_index + 1, _BLOCKING_MIDDLEWARE_PATH)
     else:
         settings.MIDDLEWARE.insert(0, _BLOCKING_MIDDLEWARE_PATH)
+
+
+def _wsgi_environ_with_request_uri(request):
+    """WSGI environ with REQUEST_URI when the server omitted it (e.g. Django runserver)."""
+    environ = request.META
+    if environ.get("RAW_URI") or environ.get("REQUEST_URI"):
+        return environ
+    path = environ.get("PATH_INFO") or request.path
+    query_string = environ.get("QUERY_STRING", "")
+    request_uri = f"{path}?{query_string}" if query_string else path
+    return {**environ, "REQUEST_URI": request_uri}
+
+
+def _apply_missing_wsgi_request_attributes(span: Span, request) -> None:
+    """Backfill span attrs using OTel WSGI collection (same path Flask/Werkzeug gets)."""
+    if not span.is_recording():
+        return
+    if span.attributes.get(HTTP_TARGET):
+        return
+    collected = collect_request_attributes(
+        _wsgi_environ_with_request_uri(request),
+        sem_conv_opt_in_mode=_DjangoMiddleware._sem_conv_opt_in_mode,
+    )
+    for key, value in collected.items():
+        if value is not None and span.attributes.get(key) is None:
+            span.set_attribute(key, value)
 
 
 class DjangoInstrumentationWrapper(BaseInstrumentorWrapper):
@@ -77,7 +100,7 @@ class DjangoInstrumentationWrapper(BaseInstrumentorWrapper):
         try:
             body = request.body
             self.generic_request_handler(request.headers, body, span)
-            span.set_attribute('http.target', _http_target(request))
+            _apply_missing_wsgi_request_attributes(span, request)
             full_url = request.build_absolute_uri()
             control_result = get_control_registry().evaluate(span,
                                                     full_url,
