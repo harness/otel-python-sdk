@@ -34,7 +34,7 @@ class BlockingMiddleware:
         if control_result is not None:
             return HttpResponse(
                 control_result.response_message,
-                status=control_result.response_status_code,
+                status=control_result.response_status_code or 403,
                 headers={},
             )
         return self.get_response(request)
@@ -99,7 +99,8 @@ class DjangoInstrumentationWrapper(BaseInstrumentorWrapper):
                                                     False)
             if control_result.block:
                 logger.debug('should block evaluated to true, aborting')
-                span.set_attribute('http.status_code', control_result.response_status_code)
+                status_code = control_result.response_status_code or 403
+                span.set_attribute('http.status_code', status_code)
                 span.end()
                 setattr(request, _IS_BLOCKED_ATTR, control_result)
         except Exception as err:  # pylint:disable=W0703
