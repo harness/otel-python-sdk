@@ -164,7 +164,10 @@ class OpenTelemetryServerInterceptorWrapper(_server.OpenTelemetryServerIntercept
                 '''Process request for hypertrace.'''
                 logger.debug(
                     'Entering OpenTelemetryServerInterceptorWrapper.telemetry_interceptor().')
-                # handle streaming responses specially
+                # Client/bidi streaming RPCs (e.g. reflection) pass an iterator.
+                if request_streaming:
+                    return behavior(request_or_iterator, context)
+                # handle server-streaming responses specially
                 if response_streaming:
                     return self._intercept_server_stream(
                         behavior,
