@@ -14,7 +14,7 @@ from harness_sdk.instrumentation import BaseInstrumentorWrapper
 from harness_sdk.custom_logger import get_custom_logger
 logger = get_custom_logger(__name__)
 
-_CONTROL_BLOCKED_ATTR = '_control_blocked'
+_IS_BLOCKED_ATTR = '_is_blocked'
 _BLOCKING_MIDDLEWARE_PATH = 'harness_sdk.instrumentation.django.BlockingMiddleware'
 
 
@@ -25,7 +25,7 @@ class BlockingMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        control_result = getattr(request, _CONTROL_BLOCKED_ATTR, None)
+        control_result = getattr(request, _IS_BLOCKED_ATTR, None)
         if control_result is not None:
             return HttpResponse(
                 control_result.response_message,
@@ -97,7 +97,7 @@ class DjangoInstrumentationWrapper(BaseInstrumentorWrapper):
         logger.debug('should block evaluated to true, aborting')
         span.set_attribute('http.status_code', control_result.response_status_code)
         span.end()
-        setattr(request, _CONTROL_BLOCKED_ATTR, control_result)
+        setattr(request, _IS_BLOCKED_ATTR, control_result)
 
     def response_hook(self, span, _request, response):
         """django response hook before response is written out"""

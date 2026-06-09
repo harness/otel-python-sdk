@@ -75,6 +75,7 @@ def test_basic_span_data(django_client, agent):
     assert attrs["http.method"] == "GET"
     assert attrs["http.server_name"] == "testserver"
     assert attrs["http.url"] == "http://testserver/test/123"
+    assert attrs["http.target"] == "/test/123"
     assert attrs.get("http.route", attrs.get("http.target")) == "test/<int:id>"
 
 
