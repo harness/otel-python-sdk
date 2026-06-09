@@ -112,6 +112,7 @@ def test_can_block(django_client, agent_with_filter, exporter):
     assert len(django_spans) >= 1
     span = django_spans[0]
     assert span.attributes['http.method'] == 'POST'
+    assert span.attributes['http.url'] == 'http://testserver/test/123'
     assert span.attributes['http.target'] == '/test/123'
     assert span.attributes['http.status_code'] == 403
 
