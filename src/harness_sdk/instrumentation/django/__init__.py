@@ -1,20 +1,21 @@
 '''Hypertrace django instrumentor module wrapper.''' # pylint: disable=R0401
 import logging
 import traceback
-from http.client import HTTPException
-from types import MethodType
 
+from django.conf import settings  # pylint:disable=C0415
+from django.http import HttpResponse  # pylint:disable=C0415
 from opentelemetry.instrumentation.django import DjangoInstrumentor
 from opentelemetry.trace import Span
 
 from harness_sdk import constants
-from harness_sdk.plugins.control import get_control_registry
+from harness_sdk.plugins.control import ControlResult, get_control_registry
 from harness_sdk.instrumentation import BaseInstrumentorWrapper
 
 from harness_sdk.custom_logger import get_custom_logger
 logger = get_custom_logger(__name__)
 
 _CONTROL_BLOCKED_ATTR = '_control_blocked'
+_BLOCKING_MIDDLEWARE_PATH = 'harness_sdk.instrumentation.django.BlockingMiddleware'
 
 
 class BlockingMiddleware:
@@ -24,12 +25,12 @@ class BlockingMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        blocked = getattr(request, _CONTROL_BLOCKED_ATTR, None)
-        if blocked:
-            from django.http import HttpResponse  # pylint:disable=C0415
+        control_result = getattr(request, _CONTROL_BLOCKED_ATTR, None)
+        if control_result is not None:
             return HttpResponse(
-                blocked.get('message', 'Permission denied'),
-                status=blocked.get('status_code', 403),
+                control_result.response_message,
+                status=control_result.response_status_code,
+                headers={},
             )
         return self.get_response(request)
 
@@ -43,10 +44,7 @@ def _http_target(request) -> str:
 
 
 def _install_blocking_middleware():
-    from django.conf import settings  # pylint:disable=C0415
-
-    middleware_path = 'harness_sdk.instrumentation.django.BlockingMiddleware'
-    if middleware_path in settings.MIDDLEWARE:
+    if _BLOCKING_MIDDLEWARE_PATH in settings.MIDDLEWARE:
         return
     otel_index = next(
         (
@@ -57,9 +55,9 @@ def _install_blocking_middleware():
         None,
     )
     if otel_index is not None:
-        settings.MIDDLEWARE.insert(otel_index + 1, middleware_path)
+        settings.MIDDLEWARE.insert(otel_index + 1, _BLOCKING_MIDDLEWARE_PATH)
     else:
-        settings.MIDDLEWARE.insert(0, middleware_path)
+        settings.MIDDLEWARE.insert(0, _BLOCKING_MIDDLEWARE_PATH)
 
 
 class DjangoInstrumentationWrapper(BaseInstrumentorWrapper):
@@ -87,20 +85,19 @@ class DjangoInstrumentationWrapper(BaseInstrumentorWrapper):
                                                     body,
                                                     False)
             if control_result.block:
-                logger.debug('should block evaluated to true, aborting')
-                status_code = control_result.response_status_code or 403
-                span.set_attribute('http.status_code', status_code)
-                span.end()
-                setattr(request, _CONTROL_BLOCKED_ATTR, {
-                    'message': control_result.response_message or 'Permission denied',
-                    'status_code': status_code,
-                })
+                self._apply_block(request, span, control_result)
         except Exception as err:  # pylint:disable=W0703
             logger.debug(constants.INST_RUNTIME_EXCEPTION_MSSG,
                          'django request hook',
                          err,
                          traceback.format_exc())
 
+    @staticmethod
+    def _apply_block(request, span: Span, control_result: ControlResult) -> None:
+        logger.debug('should block evaluated to true, aborting')
+        span.set_attribute('http.status_code', control_result.response_status_code)
+        span.end()
+        setattr(request, _CONTROL_BLOCKED_ATTR, control_result)
 
     def response_hook(self, span, _request, response):
         """django response hook before response is written out"""
