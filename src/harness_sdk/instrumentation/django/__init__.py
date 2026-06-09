@@ -6,7 +6,6 @@ from types import MethodType
 
 from opentelemetry.instrumentation.django import DjangoInstrumentor
 from opentelemetry.trace import Span
-from django.core.exceptions import PermissionDenied  # pylint:disable=C0415
 
 from harness_sdk import constants
 from harness_sdk.plugins.control import get_control_registry
@@ -15,13 +14,53 @@ from harness_sdk.instrumentation import BaseInstrumentorWrapper
 from harness_sdk.custom_logger import get_custom_logger
 logger = get_custom_logger(__name__)
 
+_CONTROL_BLOCKED_ATTR = '_control_blocked'
 
-class TraceablePermissionDenied(PermissionDenied):
-    def __init__(self, message='', status_code=403, headers=None):
-        self.message = message
-        self.status_code = status_code
-        self.headers = headers or {}
-        super().__init__(message)
+
+class BlockingMiddleware:
+    """Return a block response before the view runs (OTel swallows request_hook errors)."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        blocked = getattr(request, _CONTROL_BLOCKED_ATTR, None)
+        if blocked:
+            from django.http import HttpResponse  # pylint:disable=C0415
+            return HttpResponse(
+                blocked.get('message', 'Permission denied'),
+                status=blocked.get('status_code', 403),
+            )
+        return self.get_response(request)
+
+
+def _http_target(request) -> str:
+    target = request.path
+    query_string = request.META.get('QUERY_STRING', '')
+    if query_string:
+        target = f"{target}?{query_string}"
+    return target
+
+
+def _install_blocking_middleware():
+    from django.conf import settings  # pylint:disable=C0415
+
+    middleware_path = 'harness_sdk.instrumentation.django.BlockingMiddleware'
+    if middleware_path in settings.MIDDLEWARE:
+        return
+    otel_index = next(
+        (
+            index
+            for index, entry in enumerate(settings.MIDDLEWARE)
+            if 'opentelemetry' in entry.lower()
+        ),
+        None,
+    )
+    if otel_index is not None:
+        settings.MIDDLEWARE.insert(otel_index + 1, middleware_path)
+    else:
+        settings.MIDDLEWARE.insert(0, middleware_path)
+
 
 class DjangoInstrumentationWrapper(BaseInstrumentorWrapper):
     """wrapped class around django instrumentation"""
@@ -29,6 +68,7 @@ class DjangoInstrumentationWrapper(BaseInstrumentorWrapper):
         """configure django instrumentor w hooks"""
         DjangoInstrumentor().instrument(request_hook=self.request_hook,
                                         response_hook=self.response_hook)
+        _install_blocking_middleware()
 
     def uninstrument(self):
         """need this to match wrapper interface for specs"""
@@ -39,6 +79,7 @@ class DjangoInstrumentationWrapper(BaseInstrumentorWrapper):
         try:
             body = request.body
             self.generic_request_handler(request.headers, body, span)
+            span.set_attribute('http.target', _http_target(request))
             full_url = request.build_absolute_uri()
             control_result = get_control_registry().evaluate(span,
                                                     full_url,
@@ -48,16 +89,12 @@ class DjangoInstrumentationWrapper(BaseInstrumentorWrapper):
             if control_result.block:
                 logger.debug('should block evaluated to true, aborting')
                 status_code = control_result.response_status_code or 403
-                # since middleware chain is halted the status code is not set when blocked
                 span.set_attribute('http.status_code', status_code)
                 span.end()
-                raise TraceablePermissionDenied(
-                    message=control_result.response_message or 'Permission denied',
-                    status_code=status_code,
-                    headers={}
-                )
-        except TraceablePermissionDenied as block_exception:
-            raise block_exception
+                setattr(request, _CONTROL_BLOCKED_ATTR, {
+                    'message': control_result.response_message or 'Permission denied',
+                    'status_code': status_code,
+                })
         except Exception as err:  # pylint:disable=W0703
             logger.debug(constants.INST_RUNTIME_EXCEPTION_MSSG,
                          'django request hook',
