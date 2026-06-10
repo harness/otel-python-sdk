@@ -75,6 +75,7 @@ def test_basic_span_data(django_client, agent):
     assert attrs["http.method"] == "GET"
     assert attrs["http.server_name"] == "testserver"
     assert attrs["http.url"] == "http://testserver/test/123"
+    assert attrs["http.target"] == "/test/123"
     assert attrs.get("http.route", attrs.get("http.target")) == "test/<int:id>"
 
 
@@ -99,18 +100,21 @@ def test_collects_body_data(django_client, agent):
 
 
 def test_can_block(django_client, agent_with_filter, exporter):
-    django_client.post(
+    response = django_client.post(
         '/test/123',
         data={"some_client_data": "123"},
         content_type="application/json",
     )
+    assert response.status_code == 403
 
     django_spans = _django_spans(exporter.get_finished_spans())
     exporter.clear()
     assert len(django_spans) >= 1
-    # Blocking is enforced in the request hook (span status); Django test client may
-    # still return 200 if the OTel middleware swallows PermissionDenied.
-    assert django_spans[0].attributes['http.status_code'] == 403
+    span = django_spans[0]
+    assert span.attributes['http.method'] == 'POST'
+    assert span.attributes['http.url'] == 'http://testserver/test/123'
+    assert span.attributes['http.target'] == '/test/123'
+    assert span.attributes['http.status_code'] == 403
 
 
 def _reset_django_app_getters():
