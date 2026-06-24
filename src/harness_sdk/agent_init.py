@@ -120,7 +120,7 @@ class AgentInit:  # pylint: disable=R0902,R0903
             )
         try:
             _token = reporting.token.value
-            headers = {"harness-sdk-token": _token} if _token else {}
+            headers = {"x-harness-service-token": _token} if _token else {}
             if trace_reporter_type == config_pb2.TraceReporterType.OTLP:
                 exporter_type = 'otlp'
                 exporter_endpoint = reporting.endpoint.value
