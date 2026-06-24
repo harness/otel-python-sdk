@@ -92,21 +92,23 @@ def build_config():
 
     plugins_config = config_dict.pop('plugins', {})
 
-    enabled_control_plugins = _ordered_plugin_names_from_section(
-        plugins_config.get('control')
-    )
+    enabled_control_plugins = _parse_plugin_env('HA_CONTROL_PLUGINS')
+    if enabled_control_plugins is None:
+        enabled_control_plugins = _parse_plugin_env('AT_CONTROL_PLUGINS')
+    if enabled_control_plugins is None:
+        enabled_control_plugins = _ordered_plugin_names_from_section(
+            plugins_config.get('control')
+        )
     if not enabled_control_plugins:
-        enabled_control_plugins = _parse_plugin_env('HA_CONTROL_PLUGINS') or []
-    if not enabled_control_plugins:
-        enabled_control_plugins = _parse_plugin_env('AT_CONTROL_PLUGINS') or []
+        enabled_control_plugins = []
 
-    enabled_observability_plugins = _ordered_plugin_names_from_section(
-        plugins_config.get('observability')
-    )
-    if not enabled_observability_plugins:
-        enabled_observability_plugins = _parse_plugin_env('HA_OBSERVABILITY_PLUGINS')
-    if not enabled_observability_plugins:
+    enabled_observability_plugins = _parse_plugin_env('HA_OBSERVABILITY_PLUGINS')
+    if enabled_observability_plugins is None:
         enabled_observability_plugins = _parse_plugin_env('AT_OBSERVABILITY_PLUGINS')
+    if enabled_observability_plugins is None:
+        enabled_observability_plugins = _ordered_plugin_names_from_section(
+            plugins_config.get('observability')
+        )
     if not enabled_observability_plugins:
         enabled_observability_plugins = ['builtin_pipeline', 'builtin_span_attributes']
 
