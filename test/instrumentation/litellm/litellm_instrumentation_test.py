@@ -71,6 +71,9 @@ def test_litellm_completion_span_has_gen_ai_attributes(agent, exporter, litellm_
     assert attrs.get("gen_ai.operation.name") == "chat"
     assert attrs.get("gen_ai.system") == "openai"
     assert attrs.get("gen_ai.framework") == "litellm"
+    assert attrs.get("gen_ai.usage.input_tokens") == 3
+    assert attrs.get("gen_ai.usage.output_tokens") == 5
+    assert attrs.get("gen_ai.usage.total_tokens") == 8
 
 
 def test_litellm_evaluate_blocks_before_wrapped(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
@@ -109,6 +112,8 @@ def test_litellm_embedding_span_has_gen_ai_attributes(agent, exporter, litellm_i
     assert attrs.get("gen_ai.request.model") == "text-embedding-3-small"
     assert attrs.get("gen_ai.operation.name") == "embeddings"
     assert attrs.get("gen_ai.framework") == "litellm"
+    assert attrs.get("gen_ai.usage.input_tokens") == 4
+    assert attrs.get("gen_ai.usage.total_tokens") == 4
 
 
 @pytest.mark.asyncio
@@ -127,6 +132,9 @@ async def test_litellm_async_completion_span(agent, exporter, litellm_instrument
     exporter.clear()
     assert len(spans) >= 1
     assert spans[0].attributes.get("gen_ai.operation.name") == "chat"
+    assert spans[0].attributes.get("gen_ai.usage.input_tokens") == 3
+    assert spans[0].attributes.get("gen_ai.usage.output_tokens") == 5
+    assert spans[0].attributes.get("gen_ai.usage.total_tokens") == 8
 
 
 def test_litellm_double_instrument_is_noop(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
