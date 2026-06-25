@@ -35,7 +35,16 @@ def _fake_model_response(*_args, **_kwargs):
             }
         ],
         model="gpt-4o-mini",
-        usage={"prompt_tokens": 3, "completion_tokens": 5, "total_tokens": 8},
+        usage={
+            "prompt_tokens": 3,
+            "completion_tokens": 5,
+            "total_tokens": 8,
+            "prompt_tokens_details": {
+                "cached_tokens": 1,
+                "cache_creation_tokens": 2,
+            },
+            "completion_tokens_details": {"reasoning_tokens": 1},
+        },
     )
 
 
@@ -66,14 +75,21 @@ def test_litellm_completion_span_has_gen_ai_attributes(agent, exporter, litellm_
     spans = exporter.get_finished_spans()
     exporter.clear()
     assert len(spans) >= 1
-    attrs = spans[0].attributes
+    attrs = _request_span(spans).attributes
     assert attrs.get("gen_ai.request.model") == "gpt-4o-mini"
     assert attrs.get("gen_ai.operation.name") == "chat"
-    assert attrs.get("gen_ai.system") == "openai"
+    assert attrs.get("gen_ai.provider.name") == "openai"
+    assert "gen_ai.system" not in attrs
     assert attrs.get("gen_ai.framework") == "litellm"
+    assert attrs.get("gen_ai.response.model") == "gpt-4o-mini"
+    assert attrs.get("gen_ai.response.id") == "chatcmpl-test"
+    assert attrs.get("gen_ai.response.finish_reasons") == "['stop']"
     assert attrs.get("gen_ai.usage.input_tokens") == 3
     assert attrs.get("gen_ai.usage.output_tokens") == 5
     assert attrs.get("gen_ai.usage.total_tokens") == 8
+    assert attrs.get("gen_ai.usage.cache_read.input_tokens") == 1
+    assert attrs.get("gen_ai.usage.cache_creation.input_tokens") == 2
+    assert attrs.get("gen_ai.usage.reasoning.output_tokens") == 1
 
 
 def test_litellm_evaluate_blocks_before_wrapped(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
@@ -108,10 +124,13 @@ def test_litellm_embedding_span_has_gen_ai_attributes(agent, exporter, litellm_i
     spans = exporter.get_finished_spans()
     exporter.clear()
     assert len(spans) >= 1
-    attrs = spans[0].attributes
+    attrs = _request_span(spans).attributes
     assert attrs.get("gen_ai.request.model") == "text-embedding-3-small"
     assert attrs.get("gen_ai.operation.name") == "embeddings"
+    assert attrs.get("gen_ai.provider.name") == "openai"
+    assert "gen_ai.system" not in attrs
     assert attrs.get("gen_ai.framework") == "litellm"
+    assert attrs.get("gen_ai.response.model") == "text-embedding-3-small"
     assert attrs.get("gen_ai.usage.input_tokens") == 4
     assert attrs.get("gen_ai.usage.total_tokens") == 4
 
@@ -131,10 +150,16 @@ async def test_litellm_async_completion_span(agent, exporter, litellm_instrument
     spans = exporter.get_finished_spans()
     exporter.clear()
     assert len(spans) >= 1
-    assert spans[0].attributes.get("gen_ai.operation.name") == "chat"
-    assert spans[0].attributes.get("gen_ai.usage.input_tokens") == 3
-    assert spans[0].attributes.get("gen_ai.usage.output_tokens") == 5
-    assert spans[0].attributes.get("gen_ai.usage.total_tokens") == 8
+    attrs = _request_span(spans).attributes
+    assert attrs.get("gen_ai.operation.name") == "chat"
+    assert attrs.get("gen_ai.provider.name") == "openai"
+    assert "gen_ai.system" not in attrs
+    assert attrs.get("gen_ai.response.model") == "gpt-4o-mini"
+    assert attrs.get("gen_ai.response.id") == "chatcmpl-test"
+    assert attrs.get("gen_ai.response.finish_reasons") == "['stop']"
+    assert attrs.get("gen_ai.usage.input_tokens") == 3
+    assert attrs.get("gen_ai.usage.output_tokens") == 5
+    assert attrs.get("gen_ai.usage.total_tokens") == 8
 
 
 def test_litellm_double_instrument_is_noop(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
@@ -194,5 +219,6 @@ def test_litellm_mock_response_with_otel_callback(agent, exporter, litellm_instr
     attrs = _request_span(spans).attributes
     assert attrs.get("gen_ai.request.model") == "gpt-4o-mini"
     assert attrs.get("gen_ai.operation.name") == "chat"
-    assert attrs.get("gen_ai.system") == "openai"
+    assert attrs.get("gen_ai.provider.name") == "openai"
+    assert "gen_ai.system" not in attrs
     assert attrs.get("gen_ai.framework") == "litellm"

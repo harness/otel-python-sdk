@@ -43,6 +43,19 @@ _WRAPPED_FUNCTIONS = (
     ("aembedding", True),
 )
 
+_PROVIDER_NAME_MAP = {
+    "azure": "azure.ai.openai",
+    "azure_ai": "azure.ai.openai",
+    "azure_ai_openai": "azure.ai.openai",
+    "azureopenai": "azure.ai.openai",
+    "bedrock": "aws.bedrock",
+    "bedrock_converse": "aws.bedrock",
+    "gemini": "gcp.gemini",
+    "google": "gcp.gemini",
+    "vertex_ai": "gcp.vertex_ai",
+    "vertexai": "gcp.vertex_ai",
+}
+
 
 def _evaluate_span(span: Any) -> None:
     """Run Traceable policy evaluation against the live span; raise if blocked."""
@@ -111,6 +124,11 @@ def _resolve_provider(model: Optional[str], kwargs: dict[str, Any]) -> str:
     return "Unknown"
 
 
+def _canonical_provider_name(provider: str) -> str:
+    normalized = (provider or "unknown").strip().lower().replace("-", "_")
+    return _PROVIDER_NAME_MAP.get(normalized, normalized)
+
+
 def _operation_name(func_name: str) -> str:
     if func_name in ("embedding", "aembedding"):
         return "embeddings"
@@ -138,7 +156,9 @@ def _set_pre_call_request_attributes(
     otel_logger.safe_set_attribute(
         span, "gen_ai.operation.name", _operation_name(pre_call.call_type)
     )
-    otel_logger.safe_set_attribute(span, "gen_ai.system", provider)
+    otel_logger.safe_set_attribute(
+        span, "gen_ai.provider.name", _canonical_provider_name(provider)
+    )
     otel_logger.safe_set_attribute(span, "gen_ai.framework", "litellm")
     otel_logger.safe_set_attribute(
         span,
@@ -204,11 +224,44 @@ def _set_if_present(otel_logger: Any, span: Any, key: str, value: Any) -> None:
         otel_logger.safe_set_attribute(span, key, value)
 
 
-def _set_response_usage_attributes(otel_logger: Any, span: Any, response: Any) -> None:
-    """Copy LiteLLM usage metadata before the wrapper-owned span ends."""
+def _get_choices(response: Any) -> list[Any]:
+    choices = _get_value(response, "choices")
+    if choices is None:
+        return []
+    return list(choices)
+
+
+def _get_finish_reasons(response: Any) -> list[str]:
+    finish_reasons = []
+    for choice in _get_choices(response):
+        finish_reason = _get_value(choice, "finish_reason")
+        if finish_reason:
+            finish_reasons.append(str(finish_reason))
+    return finish_reasons
+
+
+def _set_response_attributes(otel_logger: Any, span: Any, response: Any) -> None:
+    """Copy LiteLLM response metadata before the wrapper-owned span ends."""
+    _set_if_present(
+        otel_logger,
+        span,
+        "gen_ai.response.model",
+        _get_value(response, "model"),
+    )
+    _set_if_present(otel_logger, span, "gen_ai.response.id", _get_value(response, "id"))
+
+    finish_reasons = _get_finish_reasons(response)
+    if finish_reasons:
+        otel_logger.safe_set_attribute(
+            span, "gen_ai.response.finish_reasons", finish_reasons
+        )
+
     usage = _get_usage(response)
     if usage is None:
         return
+
+    prompt_details = _get_value(usage, "prompt_tokens_details")
+    completion_details = _get_value(usage, "completion_tokens_details")
 
     input_tokens = _get_value(usage, "prompt_tokens")
     if input_tokens is None:
@@ -229,14 +282,22 @@ def _set_response_usage_attributes(otel_logger: Any, span: Any, response: Any) -
     _set_if_present(
         otel_logger,
         span,
-        "gen_ai.usage.cache_read_input_tokens",
-        _get_value(usage, "cache_read_input_tokens"),
+        "gen_ai.usage.cache_read.input_tokens",
+        _get_value(usage, "cache_read_input_tokens")
+        or _get_value(prompt_details, "cached_tokens"),
     )
     _set_if_present(
         otel_logger,
         span,
-        "gen_ai.usage.cache_creation_input_tokens",
-        _get_value(usage, "cache_creation_input_tokens"),
+        "gen_ai.usage.cache_creation.input_tokens",
+        _get_value(usage, "cache_creation_input_tokens")
+        or _get_value(prompt_details, "cache_creation_tokens"),
+    )
+    _set_if_present(
+        otel_logger,
+        span,
+        "gen_ai.usage.reasoning.output_tokens",
+        _get_value(completion_details, "reasoning_tokens"),
     )
 
 
@@ -363,7 +424,7 @@ def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
         token = _activate_span(span)
         try:
             response = wrapped(*args, **kwargs)
-            _set_response_usage_attributes(otel_logger, span, response)
+            _set_response_attributes(otel_logger, span, response)
             return response
         except Exception as exc:  # pylint: disable=broad-except
             span.record_exception(exc)
@@ -385,7 +446,7 @@ def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
         token = _activate_span(span)
         try:
             response = await wrapped(*args, **kwargs)
-            _set_response_usage_attributes(otel_logger, span, response)
+            _set_response_attributes(otel_logger, span, response)
             return response
         except Exception as exc:  # pylint: disable=broad-except
             span.record_exception(exc)
