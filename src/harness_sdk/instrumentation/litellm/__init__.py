@@ -6,10 +6,9 @@ Coverage:
   - litellm.completion / litellm.acompletion
   - litellm.embedding / litellm.aembedding
 
-Registers a ``TraceableLiteLLMOpenTelemetry`` callback (subclass of LiteLLM's
-``OpenTelemetry``) and wraps the public entry points so evaluation runs on an
-active span before the provider call. LiteLLM's OTEL callback enriches that
-span on success when it is the active parent context.
+Wraps the public entry points so evaluation runs on an active span before the
+provider call. The wrapper enriches that span with response metadata before it
+ends.
 
 Optional: ``pip install harness-sdk[litellm]``
 """
@@ -477,7 +476,6 @@ class LiteLLMInstrumentorWrapper(BaseInstrumentorWrapper):
             import litellm  # pylint: disable=import-outside-toplevel
 
             otel_logger = _get_otel_logger()
-            _register_otel_callback(otel_logger)
             main_mod = __import__(_LITELLM_MAIN, fromlist=["*"])
             for func_name, is_async in _WRAPPED_FUNCTIONS:
                 wrapt.wrap_function_wrapper(

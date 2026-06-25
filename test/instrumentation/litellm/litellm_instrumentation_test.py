@@ -205,7 +205,7 @@ def test_litellm_gen_ai_disabled_passthrough(agent, exporter, litellm_instrument
     assert len(spans) == 0
 
 
-def test_litellm_mock_response_with_otel_callback(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
+def test_litellm_mock_response_with_wrapper_enrichment(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
     litellm_instrumentor.instrument()
     litellm.completion(
         model="gpt-4o-mini",
