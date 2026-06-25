@@ -475,7 +475,6 @@ class LiteLLMInstrumentorWrapper(BaseInstrumentorWrapper):
         try:
             import litellm  # pylint: disable=import-outside-toplevel
 
-            otel_logger = _get_otel_logger()
             main_mod = __import__(_LITELLM_MAIN, fromlist=["*"])
             for func_name, is_async in _WRAPPED_FUNCTIONS:
                 wrapt.wrap_function_wrapper(
