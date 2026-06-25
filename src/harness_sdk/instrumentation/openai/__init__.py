@@ -16,6 +16,7 @@ Optional: ``pip install harness-sdk[openai]``
 
 from __future__ import annotations
 
+import inspect
 from typing import Any, Callable
 
 import wrapt
@@ -49,6 +50,47 @@ def _get_handler() -> TelemetryHandler:
     return TelemetryHandler()
 
 
+def _create_chat_invocation(
+    handler: TelemetryHandler,
+    kwargs: dict[str, Any],
+    instance: Any,
+    capture_content: bool,
+) -> Any:
+    """Support both old and new openai_v2 helper signatures."""
+    params = inspect.signature(create_chat_invocation).parameters
+    if "handler" in params:
+        return create_chat_invocation(handler, kwargs, instance, capture_content)
+    return handler.start_llm(
+        create_chat_invocation(kwargs, instance, capture_content=capture_content)
+    )
+
+
+def _stop_invocation(handler: TelemetryHandler, invocation: Any) -> None:
+    if hasattr(invocation, "stop"):
+        invocation.stop()
+        return
+    handler.stop_llm(invocation)
+
+
+def _fail_invocation(handler: TelemetryHandler, invocation: Any, error: Error) -> None:
+    if hasattr(invocation, "fail"):
+        invocation.fail(error)
+        return
+    handler.fail_llm(invocation, error)
+
+
+def _chat_stream_wrapper(
+    stream: Any,
+    handler: TelemetryHandler,
+    invocation: Any,
+    capture_content: bool,
+) -> Any:
+    params = inspect.signature(ChatStreamWrapper).parameters
+    if "handler" in params:
+        return ChatStreamWrapper(stream, handler, invocation, capture_content)
+    return ChatStreamWrapper(stream, invocation, capture_content)
+
+
 def _evaluate_invocation(invocation: Any) -> None:
     """Run Traceable policy evaluation against the live span; raise if blocked.
 
@@ -79,6 +121,47 @@ def _evaluate_invocation(invocation: Any) -> None:
         logger.debug("OpenAI span evaluation error: %s", err)
 
 
+def _get_value(obj: Any, key: str) -> Any:
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)
+
+
+def _set_if_present(target: Any, attr: str, value: Any) -> None:
+    if target is not None and value is not None:
+        setattr(target, attr, value)
+
+
+def _copy_usage_semconv(invocation: LLMInvocation, result: Any) -> None:
+    """Populate optional GenAI usage attrs not modeled by LLMInvocation."""
+    usage = _get_value(result, "usage")
+    if usage is None:
+        return
+
+    prompt_details = _get_value(usage, "prompt_tokens_details")
+    completion_details = _get_value(usage, "completion_tokens_details")
+    inf = getattr(invocation, "_inference_invocation", None) or invocation
+
+    _set_if_present(
+        inf,
+        "cache_read_input_tokens",
+        _get_value(usage, "cache_read_input_tokens")
+        or _get_value(prompt_details, "cached_tokens"),
+    )
+    _set_if_present(
+        inf,
+        "cache_creation_input_tokens",
+        _get_value(usage, "cache_creation_input_tokens")
+        or _get_value(prompt_details, "cache_creation_tokens"),
+    )
+
+    reasoning_tokens = _get_value(completion_details, "reasoning_tokens")
+    if reasoning_tokens is not None:
+        invocation.attributes["gen_ai.usage.reasoning.output_tokens"] = reasoning_tokens
+
+
 def _make_chat_create_sync(handler: TelemetryHandler, capture_content: bool) -> Callable[..., Any]:
     logger.debug("OpenAI Completions.create (sync): capture_content=%s", capture_content)
 
@@ -92,13 +175,13 @@ def _make_chat_create_sync(handler: TelemetryHandler, capture_content: bool) -> 
             logger.debug("OpenAI Completions.create (sync): gen_ai disabled, passthrough")
             return wrapped(*args, **kwargs)
 
-        invocation = handler.start_llm(
-            create_chat_invocation(kwargs, instance, capture_content=capture_content)
-        )
+        invocation = _create_chat_invocation(handler, kwargs, instance, capture_content)
         try:
             _evaluate_invocation(invocation)
         except ControlEvaluationBlocked:
-            handler.fail_llm(invocation, Error(message="blocked", type=ControlEvaluationBlocked))
+            _fail_invocation(
+                handler, invocation, Error(message="blocked", type=ControlEvaluationBlocked)
+            )
             raise
         try:
             result = wrapped(*args, **kwargs)
@@ -106,16 +189,19 @@ def _make_chat_create_sync(handler: TelemetryHandler, capture_content: bool) -> 
             if is_streaming(kwargs):
                 logger.debug("OpenAI Completions.create (sync): returning stream wrapper")
                 invocation.attributes["gen_ai.request.streaming"] = True
-                return ChatStreamWrapper(parsed_result, handler, invocation, capture_content)
+                return _chat_stream_wrapper(
+                    parsed_result, handler, invocation, capture_content
+                )
             _set_response_properties(invocation, parsed_result, capture_content)
-            handler.stop_llm(invocation)
+            _copy_usage_semconv(invocation, parsed_result)
+            _stop_invocation(handler, invocation)
             logger.debug("OpenAI Completions.create (sync): complete")
             return result
         except ControlEvaluationBlocked:
             raise
         except Exception as exc:  # pylint: disable=broad-except
             logger.debug("OpenAI Completions.create (sync): exception=%s", exc)
-            handler.fail_llm(invocation, Error(message=str(exc), type=type(exc)))
+            _fail_invocation(handler, invocation, Error(message=str(exc), type=type(exc)))
             raise
 
     return _wrapper
@@ -134,13 +220,13 @@ def _make_chat_create_async(handler: TelemetryHandler, capture_content: bool) ->
             logger.debug("OpenAI AsyncCompletions.create (async): gen_ai disabled, passthrough")
             return await wrapped(*args, **kwargs)
 
-        invocation = handler.start_llm(
-            create_chat_invocation(kwargs, instance, capture_content=capture_content)
-        )
+        invocation = _create_chat_invocation(handler, kwargs, instance, capture_content)
         try:
             _evaluate_invocation(invocation)
         except ControlEvaluationBlocked:
-            handler.fail_llm(invocation, Error(message="blocked", type=ControlEvaluationBlocked))
+            _fail_invocation(
+                handler, invocation, Error(message="blocked", type=ControlEvaluationBlocked)
+            )
             raise
         try:
             result = await wrapped(*args, **kwargs)
@@ -148,16 +234,19 @@ def _make_chat_create_async(handler: TelemetryHandler, capture_content: bool) ->
             if is_streaming(kwargs):
                 logger.debug("OpenAI AsyncCompletions.create (async): returning stream wrapper")
                 invocation.attributes["gen_ai.request.streaming"] = True
-                return ChatStreamWrapper(parsed_result, handler, invocation, capture_content)
+                return _chat_stream_wrapper(
+                    parsed_result, handler, invocation, capture_content
+                )
             _set_response_properties(invocation, parsed_result, capture_content)
-            handler.stop_llm(invocation)
+            _copy_usage_semconv(invocation, parsed_result)
+            _stop_invocation(handler, invocation)
             logger.debug("OpenAI AsyncCompletions.create (async): complete")
             return result
         except ControlEvaluationBlocked:
             raise
         except Exception as exc:  # pylint: disable=broad-except
             logger.debug("OpenAI AsyncCompletions.create (async): exception=%s", exc)
-            handler.fail_llm(invocation, Error(message=str(exc), type=type(exc)))
+            _fail_invocation(handler, invocation, Error(message=str(exc), type=type(exc)))
             raise
 
     return _wrapper

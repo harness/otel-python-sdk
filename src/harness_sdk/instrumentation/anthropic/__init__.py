@@ -78,6 +78,33 @@ def _evaluate_invocation(invocation: LLMInvocation) -> None:
         logger.debug("Anthropic span evaluation error: %s", err)
 
 
+def _set_if_present(target: Any, attr: str, value: Any) -> None:
+    if target is not None and value is not None:
+        setattr(target, attr, value)
+
+
+def _copy_usage_semconv(invocation: LLMInvocation, usage: Any) -> None:
+    """Populate optional GenAI usage attrs not modeled by LLMInvocation."""
+    if usage is None:
+        return
+
+    inf = getattr(invocation, "_inference_invocation", None)
+    _set_if_present(
+        inf,
+        "cache_read_input_tokens",
+        getattr(usage, "cache_read_input_tokens", None),
+    )
+    _set_if_present(
+        inf,
+        "cache_creation_input_tokens",
+        getattr(usage, "cache_creation_input_tokens", None),
+    )
+
+    reasoning_tokens = getattr(usage, "reasoning_output_tokens", None)
+    if reasoning_tokens is not None:
+        invocation.attributes["gen_ai.usage.reasoning.output_tokens"] = reasoning_tokens
+
+
 def _build_invocation(
     handler: TelemetryHandler,
     params: Any,
@@ -129,6 +156,7 @@ def _make_create_sync(handler: TelemetryHandler) -> Callable[..., Any]:
                 logger.debug("Anthropic Messages.create (sync): returning stream wrapper")
                 return _MessagesStreamWrapper(result, handler, invocation, capture_content)
             set_invocation_response_attributes(invocation, result, capture_content)
+            _copy_usage_semconv(invocation, getattr(result, "usage", None))
             handler.stop_llm(invocation)
             logger.debug("Anthropic Messages.create (sync): complete")
             return result
@@ -173,6 +201,7 @@ def _make_create_async(handler: TelemetryHandler) -> Callable[..., Any]:
                 logger.debug("Anthropic Messages.create (async): returning stream wrapper")
                 return _AsyncMessagesStreamWrapper(result, handler, invocation, capture_content)
             set_invocation_response_attributes(invocation, result, capture_content)
+            _copy_usage_semconv(invocation, getattr(result, "usage", None))
             handler.stop_llm(invocation)
             logger.debug("Anthropic Messages.create (async): complete")
             return result
