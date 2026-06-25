@@ -182,6 +182,64 @@ def _set_pre_call_request_attributes(
         logger.debug("LiteLLM: failed to set input attributes on span: %s", err)
 
 
+def _get_value(obj: Any, key: str) -> Any:
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)
+
+
+def _get_usage(response: Any) -> Any:
+    usage = _get_value(response, "usage")
+    if usage is not None:
+        return usage
+    if isinstance(response, dict):
+        return response.get("usage")
+    return None
+
+
+def _set_if_present(otel_logger: Any, span: Any, key: str, value: Any) -> None:
+    if value is not None:
+        otel_logger.safe_set_attribute(span, key, value)
+
+
+def _set_response_usage_attributes(otel_logger: Any, span: Any, response: Any) -> None:
+    """Copy LiteLLM usage metadata before the wrapper-owned span ends."""
+    usage = _get_usage(response)
+    if usage is None:
+        return
+
+    input_tokens = _get_value(usage, "prompt_tokens")
+    if input_tokens is None:
+        input_tokens = _get_value(usage, "input_tokens")
+
+    output_tokens = _get_value(usage, "completion_tokens")
+    if output_tokens is None:
+        output_tokens = _get_value(usage, "output_tokens")
+
+    _set_if_present(otel_logger, span, "gen_ai.usage.input_tokens", input_tokens)
+    _set_if_present(otel_logger, span, "gen_ai.usage.output_tokens", output_tokens)
+    _set_if_present(
+        otel_logger,
+        span,
+        "gen_ai.usage.total_tokens",
+        _get_value(usage, "total_tokens"),
+    )
+    _set_if_present(
+        otel_logger,
+        span,
+        "gen_ai.usage.cache_read_input_tokens",
+        _get_value(usage, "cache_read_input_tokens"),
+    )
+    _set_if_present(
+        otel_logger,
+        span,
+        "gen_ai.usage.cache_creation_input_tokens",
+        _get_value(usage, "cache_creation_input_tokens"),
+    )
+
+
 def _build_traceable_otel_class() -> type:
     from litellm.integrations.opentelemetry import (  # pylint: disable=import-outside-toplevel
         OpenTelemetry,
@@ -304,7 +362,9 @@ def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
         span = _start_evaluated_span(otel_logger, func_name, args, kwargs)
         token = _activate_span(span)
         try:
-            return wrapped(*args, **kwargs)
+            response = wrapped(*args, **kwargs)
+            _set_response_usage_attributes(otel_logger, span, response)
+            return response
         except Exception as exc:  # pylint: disable=broad-except
             span.record_exception(exc)
             span.set_status(Status(StatusCode.ERROR, str(exc)))
@@ -324,7 +384,9 @@ def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
         span = _start_evaluated_span(otel_logger, func_name, args, kwargs)
         token = _activate_span(span)
         try:
-            return await wrapped(*args, **kwargs)
+            response = await wrapped(*args, **kwargs)
+            _set_response_usage_attributes(otel_logger, span, response)
+            return response
         except Exception as exc:  # pylint: disable=broad-except
             span.record_exception(exc)
             span.set_status(Status(StatusCode.ERROR, str(exc)))
