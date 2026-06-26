@@ -40,6 +40,11 @@ class _FakeChoice:
 class _FakeUsage:
     prompt_tokens = 3
     completion_tokens = 7
+    prompt_tokens_details = SimpleNamespace(
+        cached_tokens=1,
+        cache_creation_tokens=2,
+    )
+    completion_tokens_details = SimpleNamespace(reasoning_tokens=4)
 
 
 class _FakeChatCompletion:
@@ -72,6 +77,9 @@ def test_openai_span_has_gen_ai_attributes(agent, exporter, openai_instrumentor)
     assert attrs.get("gen_ai.response.id") == "chatcmpl-test"
     assert attrs.get("gen_ai.usage.input_tokens") == 3
     assert attrs.get("gen_ai.usage.output_tokens") == 7
+    assert attrs.get("gen_ai.usage.cache_read.input_tokens") == 1
+    assert attrs.get("gen_ai.usage.cache_creation.input_tokens") == 2
+    assert attrs.get("gen_ai.usage.reasoning.output_tokens") == 4
 
 
 

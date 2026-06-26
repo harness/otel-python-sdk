@@ -31,8 +31,9 @@ def anthropic_instrumentor():
 class _FakeUsage:
     input_tokens = 2
     output_tokens = 4
-    cache_creation_input_tokens = None
-    cache_read_input_tokens = None
+    cache_creation_input_tokens = 1
+    cache_read_input_tokens = 3
+    reasoning_output_tokens = 2
 
 
 class _FakeMessage:
@@ -62,12 +63,16 @@ def test_anthropic_span_has_gen_ai_attributes(agent, exporter, anthropic_instrum
     exporter.clear()
     assert len(spans) == 1
     attrs = spans[0].attributes
-    assert attrs.get("gen_ai.system") == "anthropic"
+    assert attrs.get("gen_ai.provider.name") == "anthropic"
+    assert "gen_ai.system" not in attrs
     assert attrs.get("gen_ai.operation.name") == "chat"
     assert attrs.get("gen_ai.request.model") == "claude-3-haiku-20240307"
     assert attrs.get("gen_ai.response.id") == "msg_test"
     assert attrs.get("gen_ai.usage.input_tokens") == 2
     assert attrs.get("gen_ai.usage.output_tokens") == 4
+    assert attrs.get("gen_ai.usage.cache_read.input_tokens") == 3
+    assert attrs.get("gen_ai.usage.cache_creation.input_tokens") == 1
+    assert attrs.get("gen_ai.usage.reasoning.output_tokens") == 2
 
 
 async def test_async_messages_create_span_has_gen_ai_attributes(agent, exporter, anthropic_instrumentor):
@@ -87,11 +92,15 @@ async def test_async_messages_create_span_has_gen_ai_attributes(agent, exporter,
     exporter.clear()
     assert len(spans) == 1
     attrs = spans[0].attributes
-    assert attrs.get("gen_ai.system") == "anthropic"
+    assert attrs.get("gen_ai.provider.name") == "anthropic"
+    assert "gen_ai.system" not in attrs
     assert attrs.get("gen_ai.request.model") == "claude-3-haiku-20240307"
     assert attrs.get("gen_ai.response.id") == "msg_test"
     assert attrs.get("gen_ai.usage.input_tokens") == 2
     assert attrs.get("gen_ai.usage.output_tokens") == 4
+    assert attrs.get("gen_ai.usage.cache_read.input_tokens") == 3
+    assert attrs.get("gen_ai.usage.cache_creation.input_tokens") == 1
+    assert attrs.get("gen_ai.usage.reasoning.output_tokens") == 2
 
 
 
@@ -316,7 +325,8 @@ def test_messages_stream_sync_span_after_consume(agent, exporter, anthropic_inst
     exporter.clear()
     assert len(spans) == 1
     attrs = spans[0].attributes
-    assert attrs.get("gen_ai.system") == "anthropic"
+    assert attrs.get("gen_ai.provider.name") == "anthropic"
+    assert "gen_ai.system" not in attrs
     assert attrs.get("gen_ai.usage.output_tokens") == 5
 
 
