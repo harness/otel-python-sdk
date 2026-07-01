@@ -75,6 +75,7 @@ _RAW_SENSITIVE_KEYS = frozenset(
 # Bedrock returns the actual executing model id in a response header, which is
 # useful when the request targets an inference profile ARN.
 _BEDROCK_MODEL_ID_HEADER = "x-amzn-bedrock-model-id"
+_LITELLM_PROVIDER_HEADER_PREFIX = "llm_provider-"
 
 _WRAPPED_FUNCTIONS = (
     ("completion", False),
@@ -300,7 +301,7 @@ def _extract_bedrock_execution_model(response: Any) -> Optional[str]:
     for headers in (additional, hidden):
         if isinstance(headers, dict):
             for key, value in headers.items():
-                if str(key).lower() == _BEDROCK_MODEL_ID_HEADER and value:
+                if _is_bedrock_model_id_header(key) and value:
                     return str(value)
 
     response_metadata = _get_value(hidden, "response_metadata") or _get_value(
@@ -311,9 +312,17 @@ def _extract_bedrock_execution_model(response: Any) -> Optional[str]:
     )
     if isinstance(http_headers, dict):
         for key, value in http_headers.items():
-            if str(key).lower() == _BEDROCK_MODEL_ID_HEADER and value:
+            if _is_bedrock_model_id_header(key) and value:
                 return str(value)
     return None
+
+
+def _is_bedrock_model_id_header(key: Any) -> bool:
+    normalized = str(key).lower()
+    return normalized in {
+        _BEDROCK_MODEL_ID_HEADER,
+        f"{_LITELLM_PROVIDER_HEADER_PREFIX}{_BEDROCK_MODEL_ID_HEADER}",
+    }
 
 
 def _raw_capture_enabled() -> bool:

@@ -279,6 +279,29 @@ def test_litellm_bedrock_execution_model_from_hidden_params(agent, exporter, lit
     assert attrs.get("aws.bedrock.execution_model_id") == "anthropic.claude-haiku-4-5-v1:0"
 
 
+def test_litellm_bedrock_execution_model_from_normalized_header(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
+    def _bedrock_response(*_args, **_kwargs):
+        resp = _fake_model_response()
+        resp._hidden_params = {
+            "additional_headers": {
+                "llm_provider-x-amzn-bedrock-model-id": "anthropic.claude-haiku-4-5-v1:0"
+            }
+        }
+        return resp
+
+    with patch("litellm.main.completion", new=_bedrock_response):
+        litellm_instrumentor.instrument()
+        litellm.completion(
+            model="bedrock/converse/arn:aws:bedrock:us-east-1:1234:application-inference-profile/abc",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+    spans = exporter.get_finished_spans()
+    exporter.clear()
+    attrs = _request_span(spans).attributes
+    assert attrs.get("aws.bedrock.execution_model_id") == "anthropic.claude-haiku-4-5-v1:0"
+
+
 def test_litellm_raw_usage_capture_opt_in(agent, exporter, litellm_instrumentor, monkeypatch):  # pylint: disable=unused-argument
     monkeypatch.setenv("HA_GEN_AI_RAW_CAPTURE_ENABLED", "true")
     with patch("litellm.main.completion", new=_fake_model_response):
