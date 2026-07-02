@@ -38,12 +38,6 @@ logger = get_custom_logger(__name__)
 _LITELLM_MAIN = "litellm.main"
 _LITELLM_REQUEST_SPAN_NAME = "litellm_request"
 
-# LiteLLM's async entry points (acompletion/aembedding) internally re-dispatch to
-# their sync counterparts (completion/embedding) via ``run_in_executor`` with a
-# copied context. Because we wrap all four functions, that inner sync call would
-# otherwise create a second, empty ``litellm_request`` span nested under the real
-# one. This context flag lets a wrapper detect that it is already running inside
-# an active SDK LiteLLM span and skip creating a duplicate.
 _LITELLM_SPAN_ACTIVE: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "harness_litellm_span_active", default=False
 )
