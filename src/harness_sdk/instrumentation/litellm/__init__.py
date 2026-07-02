@@ -15,6 +15,9 @@ Optional: ``pip install harness-sdk[litellm]``
 
 from __future__ import annotations
 
+import contextvars
+import json
+import os
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
@@ -34,6 +37,39 @@ logger = get_custom_logger(__name__)
 
 _LITELLM_MAIN = "litellm.main"
 _LITELLM_REQUEST_SPAN_NAME = "litellm_request"
+
+_LITELLM_SPAN_ACTIVE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "harness_litellm_span_active", default=False
+)
+
+# Env var to opt into bounded raw response/usage capture as a resilience fallback
+# when LiteLLM changes response object shape or field names.
+_RAW_CAPTURE_ENV = "HA_GEN_AI_RAW_CAPTURE_ENABLED"
+_RAW_CAPTURE_MAX_BYTES_ENV = "HA_GEN_AI_RAW_CAPTURE_MAX_BYTES"
+_RAW_CAPTURE_DEFAULT_MAX_BYTES = 8192
+
+# Fields that must never be serialized into the raw usage/response fallback.
+_RAW_SENSITIVE_KEYS = frozenset(
+    {
+        "messages",
+        "input",
+        "prompt",
+        "content",
+        "choices",
+        "data",
+        "embedding",
+        "api_key",
+        "authorization",
+        "headers",
+        "aws_secret_access_key",
+        "aws_session_token",
+    }
+)
+
+# Bedrock returns the actual executing model id in a response header, which is
+# useful when the request targets an inference profile ARN.
+_BEDROCK_MODEL_ID_HEADER = "x-amzn-bedrock-model-id"
+_LITELLM_PROVIDER_HEADER_PREFIX = "llm_provider-"
 
 _WRAPPED_FUNCTIONS = (
     ("completion", False),
@@ -209,55 +245,182 @@ def _get_value(obj: Any, key: str) -> Any:
     return getattr(obj, key, None)
 
 
-def _get_usage(response: Any) -> Any:
-    usage = _get_value(response, "usage")
-    if usage is not None:
-        return usage
-    if isinstance(response, dict):
-        return response.get("usage")
-    return None
-
-
 def _set_if_present(otel_logger: Any, span: Any, key: str, value: Any) -> None:
     if value is not None:
         otel_logger.safe_set_attribute(span, key, value)
 
 
-def _get_choices(response: Any) -> list[Any]:
-    choices = _get_value(response, "choices")
-    if choices is None:
-        return []
-    return list(choices)
+@dataclass(frozen=True)
+class _LiteLLMResponseMetadata:
+    """Version-tolerant accessor for LiteLLM response dicts/objects."""
+
+    response: Any
+
+    def value(self, key: str) -> Any:
+        return _get_value(self.response, key)
+
+    def hidden_params(self) -> Any:
+        return self.value("_hidden_params")
+
+    def usage(self) -> Any:
+        return self.value("usage")
+
+    def choices(self) -> list[Any]:
+        choices = self.value("choices")
+        if choices is None:
+            return []
+        return list(choices)
+
+    def finish_reasons(self) -> list[str]:
+        finish_reasons = []
+        for choice in self.choices():
+            finish_reason = _get_value(choice, "finish_reason")
+            if finish_reason:
+                finish_reasons.append(str(finish_reason))
+        return finish_reasons
+
+    def header_maps(self) -> list[dict[Any, Any]]:
+        hidden = self.hidden_params()
+        if hidden is None:
+            return []
+
+        headers = []
+        additional = _get_value(hidden, "additional_headers")
+        if isinstance(additional, dict):
+            headers.append(additional)
+        if isinstance(hidden, dict):
+            headers.append(hidden)
+
+        response_metadata = _get_value(hidden, "response_metadata") or _get_value(
+            hidden, "ResponseMetadata"
+        )
+        http_headers = _get_value(response_metadata, "HTTPHeaders") or _get_value(
+            response_metadata, "http_headers"
+        )
+        if isinstance(http_headers, dict):
+            headers.append(http_headers)
+        return headers
+
+    def bedrock_execution_model(self) -> Optional[str]:
+        for headers in self.header_maps():
+            for key, value in headers.items():
+                if _is_bedrock_model_id_header(key) and value:
+                    return str(value)
+        return None
 
 
-def _get_finish_reasons(response: Any) -> list[str]:
-    finish_reasons = []
-    for choice in _get_choices(response):
-        finish_reason = _get_value(choice, "finish_reason")
-        if finish_reason:
-            finish_reasons.append(str(finish_reason))
-    return finish_reasons
+def _is_bedrock_model_id_header(key: Any) -> bool:
+    normalized = str(key).lower()
+    return normalized in {
+        _BEDROCK_MODEL_ID_HEADER,
+        f"{_LITELLM_PROVIDER_HEADER_PREFIX}{_BEDROCK_MODEL_ID_HEADER}",
+    }
 
 
-def _set_response_attributes(otel_logger: Any, span: Any, response: Any) -> None:
+def _raw_capture_enabled() -> bool:
+    return os.getenv(_RAW_CAPTURE_ENV, "").strip().lower() == "true"
+
+
+def _raw_capture_max_bytes() -> int:
+    raw = os.getenv(_RAW_CAPTURE_MAX_BYTES_ENV, "").strip()
+    if not raw:
+        return _RAW_CAPTURE_DEFAULT_MAX_BYTES
+    try:
+        value = int(raw)
+        return value if value > 0 else _RAW_CAPTURE_DEFAULT_MAX_BYTES
+    except ValueError:
+        return _RAW_CAPTURE_DEFAULT_MAX_BYTES
+
+
+def _to_plain(obj: Any) -> Any:
+    """Convert dict/object/Pydantic usage payloads into a JSON-safe dict."""
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    if isinstance(obj, dict):
+        return {
+            key: _to_plain(value)
+            for key, value in obj.items()
+            if str(key).lower() not in _RAW_SENSITIVE_KEYS
+        }
+    for attr in ("model_dump", "dict"):
+        method = getattr(obj, attr, None)
+        if callable(method):
+            try:
+                return _to_plain(method())
+            except Exception:  # pylint: disable=broad-except
+                pass
+    data = getattr(obj, "__dict__", None)
+    if isinstance(data, dict):
+        return {
+            key: _to_plain(value)
+            for key, value in data.items()
+            if not key.startswith("_")
+            and str(key).lower() not in _RAW_SENSITIVE_KEYS
+        }
+    return str(obj)
+
+
+def _serialize_bounded(obj: Any, max_bytes: int) -> tuple[str, bool]:
+    try:
+        serialized = json.dumps(_to_plain(obj), default=str, ensure_ascii=False)
+    except Exception:  # pylint: disable=broad-except
+        serialized = str(obj)
+    if len(serialized) > max_bytes:
+        return serialized[:max_bytes], True
+    return serialized, False
+
+
+def _set_raw_usage_capture(otel_logger: Any, span: Any, usage: Any) -> None:
+    if usage is None or not _raw_capture_enabled():
+        return
+    serialized, truncated = _serialize_bounded(usage, _raw_capture_max_bytes())
+    otel_logger.safe_set_attribute(span, "gen_ai.response.usage.raw", serialized)
+    if truncated:
+        otel_logger.safe_set_attribute(
+            span, "gen_ai.response.usage.raw_truncated", True
+        )
+
+
+def _set_response_attributes(
+    otel_logger: Any,
+    span: Any,
+    response: Any,
+    request_model: Optional[str] = None,
+) -> None:
     """Copy LiteLLM response metadata before the wrapper-owned span ends."""
-    _set_if_present(
-        otel_logger,
-        span,
-        "gen_ai.response.model",
-        _get_value(response, "model"),
-    )
-    _set_if_present(otel_logger, span, "gen_ai.response.id", _get_value(response, "id"))
+    metadata = _LiteLLMResponseMetadata(response)
+    response_model = metadata.value("model")
+    bedrock_execution_model = metadata.bedrock_execution_model()
+    if bedrock_execution_model:
+        otel_logger.safe_set_attribute(
+            span, "aws.bedrock.execution_model_id", bedrock_execution_model
+        )
 
-    finish_reasons = _get_finish_reasons(response)
+    _set_if_present(otel_logger, span, "gen_ai.response.id", metadata.value("id"))
+
+    finish_reasons = metadata.finish_reasons()
     if finish_reasons:
         otel_logger.safe_set_attribute(
             span, "gen_ai.response.finish_reasons", finish_reasons
         )
 
-    usage = _get_usage(response)
+    usage = metadata.usage()
+
+    # Guarantee gen_ai.response.model on any span that carries token usage so it
+    # can join rate cards by provider + model. Prefer the provider response
+    # model, fall back to the requested model when the provider omits it.
+    effective_response_model = response_model or request_model
+    if effective_response_model is not None and (
+        response_model is not None or usage is not None
+    ):
+        otel_logger.safe_set_attribute(
+            span, "gen_ai.response.model", effective_response_model
+        )
+
     if usage is None:
         return
+
+    _set_raw_usage_capture(otel_logger, span, usage)
 
     prompt_details = _get_value(usage, "prompt_tokens_details")
     completion_details = _get_value(usage, "completion_tokens_details")
@@ -407,6 +570,49 @@ def _start_evaluated_span(
     return span
 
 
+@dataclass
+class _LiteLLMSpanRun:
+    otel_logger: Any
+    func_name: str
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
+    request_model: Optional[str] = None
+    span: Any = None
+    token: Optional[object] = None
+    guard: Optional[object] = None
+
+    def __enter__(self) -> "_LiteLLMSpanRun":
+        self.request_model, _ = _extract_model_and_input(self.args, self.kwargs)
+        self.span = _start_evaluated_span(
+            self.otel_logger, self.func_name, self.args, self.kwargs
+        )
+        self.token = _activate_span(self.span)
+        self.guard = _LITELLM_SPAN_ACTIVE.set(True)
+        return self
+
+    def set_response_attributes(self, response: Any) -> None:
+        _set_response_attributes(
+            self.otel_logger, self.span, response, request_model=self.request_model
+        )
+
+    def __exit__(
+        self,
+        _exc_type: Optional[type[BaseException]],
+        exc: Optional[BaseException],
+        _traceback: Any,
+    ) -> bool:
+        try:
+            if exc is not None:
+                self.span.record_exception(exc)
+                self.span.set_status(Status(StatusCode.ERROR, str(exc)))
+        finally:
+            if self.guard is not None:
+                _LITELLM_SPAN_ACTIVE.reset(self.guard)
+            if self.token is not None and self.span is not None:
+                _deactivate_span(self.token, self.span)
+        return False
+
+
 def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
     otel_logger = _get_otel_logger()
 
@@ -419,18 +625,15 @@ def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
         if not Config().config.gen_ai.enabled.value:
             return wrapped(*args, **kwargs)
 
-        span = _start_evaluated_span(otel_logger, func_name, args, kwargs)
-        token = _activate_span(span)
-        try:
+        # Skip nested re-dispatch (e.g. aembedding -> embedding) so each provider
+        # call yields exactly one litellm_request span.
+        if _LITELLM_SPAN_ACTIVE.get():
+            return wrapped(*args, **kwargs)
+
+        with _LiteLLMSpanRun(otel_logger, func_name, args, kwargs) as span_run:
             response = wrapped(*args, **kwargs)
-            _set_response_attributes(otel_logger, span, response)
+            span_run.set_response_attributes(response)
             return response
-        except Exception as exc:  # pylint: disable=broad-except
-            span.record_exception(exc)
-            span.set_status(Status(StatusCode.ERROR, str(exc)))
-            raise
-        finally:
-            _deactivate_span(token, span)
 
     async def _async_wrapper(
         wrapped: Callable[..., Any],
@@ -441,18 +644,13 @@ def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
         if not Config().config.gen_ai.enabled.value:
             return await wrapped(*args, **kwargs)
 
-        span = _start_evaluated_span(otel_logger, func_name, args, kwargs)
-        token = _activate_span(span)
-        try:
+        if _LITELLM_SPAN_ACTIVE.get():
+            return await wrapped(*args, **kwargs)
+
+        with _LiteLLMSpanRun(otel_logger, func_name, args, kwargs) as span_run:
             response = await wrapped(*args, **kwargs)
-            _set_response_attributes(otel_logger, span, response)
+            span_run.set_response_attributes(response)
             return response
-        except Exception as exc:  # pylint: disable=broad-except
-            span.record_exception(exc)
-            span.set_status(Status(StatusCode.ERROR, str(exc)))
-            raise
-        finally:
-            _deactivate_span(token, span)
 
     return _async_wrapper if is_async else _sync_wrapper
 

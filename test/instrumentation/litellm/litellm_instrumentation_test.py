@@ -64,6 +64,10 @@ def _request_span(spans):
     return spans[0]
 
 
+def _litellm_spans(spans):
+    return [span for span in spans if span.name == "litellm_request"]
+
+
 def test_litellm_completion_span_has_gen_ai_attributes(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
     with patch("litellm.main.completion", new=_fake_model_response):
         litellm_instrumentor.instrument()
@@ -174,6 +178,159 @@ def test_litellm_double_instrument_is_noop(agent, exporter, litellm_instrumentor
     spans = exporter.get_finished_spans()
     exporter.clear()
     assert len(spans) >= 1
+
+
+@pytest.mark.asyncio
+async def test_litellm_async_embedding_emits_single_span(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
+    # Real litellm.aembedding re-dispatches to the sync embedding via an executor.
+    # Only one litellm_request span must be produced for that single provider call.
+    with patch("litellm.main.embedding", new=_fake_embedding_response):
+        litellm_instrumentor.instrument()
+        await litellm.aembedding(model="text-embedding-3-small", input="trace this")
+
+    spans = exporter.get_finished_spans()
+    exporter.clear()
+    llm_spans = _litellm_spans(spans)
+    assert len(llm_spans) == 1
+    attrs = llm_spans[0].attributes
+    assert attrs.get("gen_ai.operation.name") == "embeddings"
+    assert attrs.get("gen_ai.response.model") == "text-embedding-3-small"
+    assert attrs.get("gen_ai.usage.input_tokens") == 4
+
+
+@pytest.mark.asyncio
+async def test_litellm_async_completion_emits_single_span(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
+    with patch("litellm.main.completion", new=_fake_model_response):
+        litellm_instrumentor.instrument()
+        await litellm.acompletion(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+    spans = exporter.get_finished_spans()
+    exporter.clear()
+    llm_spans = _litellm_spans(spans)
+    assert len(llm_spans) == 1
+    attrs = llm_spans[0].attributes
+    assert attrs.get("gen_ai.usage.input_tokens") == 3
+    assert attrs.get("gen_ai.usage.output_tokens") == 5
+
+
+def test_litellm_embedding_dict_response(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
+    def _dict_embedding(*_args, **_kwargs):
+        return {
+            "model": "text-embedding-3-small",
+            "data": [{"embedding": [0.1], "index": 0, "object": "embedding"}],
+            "usage": {"prompt_tokens": 7, "total_tokens": 7},
+        }
+
+    with patch("litellm.main.embedding", new=_dict_embedding):
+        litellm_instrumentor.instrument()
+        litellm.embedding(model="text-embedding-3-small", input="trace this")
+
+    spans = exporter.get_finished_spans()
+    exporter.clear()
+    attrs = _request_span(spans).attributes
+    assert attrs.get("gen_ai.response.model") == "text-embedding-3-small"
+    assert attrs.get("gen_ai.usage.input_tokens") == 7
+    assert attrs.get("gen_ai.usage.total_tokens") == 7
+
+
+def test_litellm_response_model_fallback_to_request_model(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
+    def _no_model_embedding(*_args, **_kwargs):
+        resp = EmbeddingResponse(
+            model="text-embedding-3-small",
+            data=[{"embedding": [0.1], "index": 0, "object": "embedding"}],
+            usage={"prompt_tokens": 4, "total_tokens": 4},
+        )
+        resp.model = None
+        return resp
+
+    with patch("litellm.main.embedding", new=_no_model_embedding):
+        litellm_instrumentor.instrument()
+        litellm.embedding(model="text-embedding-3-small", input="trace this")
+
+    spans = exporter.get_finished_spans()
+    exporter.clear()
+    attrs = _request_span(spans).attributes
+    assert attrs.get("gen_ai.response.model") == "text-embedding-3-small"
+
+
+def test_litellm_bedrock_execution_model_from_hidden_params(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
+    def _bedrock_response(*_args, **_kwargs):
+        resp = _fake_model_response()
+        resp._hidden_params = {
+            "additional_headers": {
+                "x-amzn-bedrock-model-id": "anthropic.claude-haiku-4-5-v1:0"
+            }
+        }
+        return resp
+
+    with patch("litellm.main.completion", new=_bedrock_response):
+        litellm_instrumentor.instrument()
+        litellm.completion(
+            model="bedrock/converse/arn:aws:bedrock:us-east-1:1234:application-inference-profile/abc",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+    spans = exporter.get_finished_spans()
+    exporter.clear()
+    attrs = _request_span(spans).attributes
+    assert attrs.get("aws.bedrock.execution_model_id") == "anthropic.claude-haiku-4-5-v1:0"
+
+
+def test_litellm_bedrock_execution_model_from_normalized_header(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
+    def _bedrock_response(*_args, **_kwargs):
+        resp = _fake_model_response()
+        resp._hidden_params = {
+            "additional_headers": {
+                "llm_provider-x-amzn-bedrock-model-id": "anthropic.claude-haiku-4-5-v1:0"
+            }
+        }
+        return resp
+
+    with patch("litellm.main.completion", new=_bedrock_response):
+        litellm_instrumentor.instrument()
+        litellm.completion(
+            model="bedrock/converse/arn:aws:bedrock:us-east-1:1234:application-inference-profile/abc",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+    spans = exporter.get_finished_spans()
+    exporter.clear()
+    attrs = _request_span(spans).attributes
+    assert attrs.get("aws.bedrock.execution_model_id") == "anthropic.claude-haiku-4-5-v1:0"
+
+
+def test_litellm_raw_usage_capture_opt_in(agent, exporter, litellm_instrumentor, monkeypatch):  # pylint: disable=unused-argument
+    monkeypatch.setenv("HA_GEN_AI_RAW_CAPTURE_ENABLED", "true")
+    with patch("litellm.main.completion", new=_fake_model_response):
+        litellm_instrumentor.instrument()
+        litellm.completion(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+    spans = exporter.get_finished_spans()
+    exporter.clear()
+    attrs = _request_span(spans).attributes
+    raw = attrs.get("gen_ai.response.usage.raw")
+    assert raw is not None
+    assert "prompt_tokens" in raw
+
+
+def test_litellm_raw_usage_capture_disabled_by_default(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
+    with patch("litellm.main.completion", new=_fake_model_response):
+        litellm_instrumentor.instrument()
+        litellm.completion(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+    spans = exporter.get_finished_spans()
+    exporter.clear()
+    attrs = _request_span(spans).attributes
+    assert "gen_ai.response.usage.raw" not in attrs
 
 
 def test_litellm_gen_ai_disabled_passthrough(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
