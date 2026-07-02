@@ -1,4 +1,4 @@
-"""Default OTLP export pipeline with sampling and attribute processors."""
+"""Default OTLP export pipeline with db-filter and attribute processors."""
 import os
 from typing import Any, List
 
@@ -8,13 +8,13 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from harness_sdk.agent_init import AgentInit
 from harness_sdk.custom_logger import get_custom_logger
 from harness_sdk.excluded_by_attribute_span_processor import ExcludeByAttributeSpanProcessor
-from harness_sdk.sampling_span_processor import SamplingSpanProcessor
+from harness_sdk.db_control_span_processor import DbControlSpanProcessor
 
 logger = get_custom_logger(__name__)
 
 
 class BuiltinPipelinePlugin:
-    """Observability plugin that wires exporter + sampling + exclusion processors."""
+    """Observability plugin that wires exporter + db-filter + exclusion processors."""
 
     name = "builtin_pipeline"
     priority = 100
@@ -32,7 +32,7 @@ class BuiltinPipelinePlugin:
             self._agent_init.set_console_span_processor()
             return []
 
-        exporter = self._agent_init._init_exporter(  # pylint: disable=protected-access
+        exporter = self._agent_init.init_exporter(
             config.config.reporting.trace_reporter_type
         )
         if exporter is None:
@@ -45,8 +45,8 @@ class BuiltinPipelinePlugin:
             attribute_name="traceableai.span_type",
             excluded_value="nospan",
         )
-        sampling_processor = SamplingSpanProcessor(filter_processor)
-        return [sampling_processor]
+        db_control_processor = DbControlSpanProcessor(filter_processor)
+        return [db_control_processor]
 
     def shutdown(self) -> None:
         pass
