@@ -49,10 +49,13 @@ def _filter_sdk_config(file_dict):
 
 class Config:  # pylint:disable=R0903
     _instance = None
+    _singleton_lock = __import__('threading').Lock()
 
     def __new__(cls):
-        if not hasattr(cls, "_instance") or cls._instance is None:
-            cls._instance = super(Config, cls).__new__(cls)
+        if getattr(cls, '_instance', None) is None:
+            with cls._singleton_lock:
+                if getattr(cls, '_instance', None) is None:
+                    cls._instance = super(Config, cls).__new__(cls)
         return cls._instance
 
     def __init__(self):
@@ -76,8 +79,7 @@ class Config:  # pylint:disable=R0903
 def merge_config(base_config, overriding_config):
     for key in overriding_config:
         if key in base_config and isinstance(base_config[key], dict):
-            if key in overriding_config:
-                base_config[key] = merge_config(base_config[key], overriding_config[key])
+            base_config[key] = merge_config(base_config[key], overriding_config[key])
         else:
             base_config[key] = overriding_config[key]
     return base_config

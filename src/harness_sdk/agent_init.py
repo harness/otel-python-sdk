@@ -34,12 +34,8 @@ class AgentInit:  # pylint: disable=R0902,R0903
         logger.debug('Initializing AgentInit object.')
         self._config = agent_config
 
-        if hasattr(os, 'register_at_fork'):
-            logger.info('Registering after_in_child handler.')
-            os.register_at_fork(after_in_child=self.post_fork)  # pylint:disable=E1101
-
     def post_fork(self):
-        self.apply_config(self._config)  # pylint:disable=W0212
+        self.apply_config(self._config)
 
     def apply_config(self, agent_config):
         if agent_config:
@@ -107,7 +103,7 @@ class AgentInit:  # pylint: disable=R0902,R0903
         simple_export_span_processor = SimpleSpanProcessor(console_span_exporter)
         trace.get_tracer_provider().add_span_processor(simple_export_span_processor)
 
-    def _init_exporter(self, trace_reporter_type):
+    def init_exporter(self, trace_reporter_type):
         exporter_type = ''
         exporter = None
         exporter_endpoint = None

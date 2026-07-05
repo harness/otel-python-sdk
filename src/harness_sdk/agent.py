@@ -43,11 +43,11 @@ class Agent:
 
     def __init__(self):
         if getattr(self, "_initialized", False):
-            self.is_lambda = False
             return
         logger.debug('Initializing Agent.')
         if not self.is_enabled():
             return
+        self.is_lambda = False
         try:
             self._config = Config()
             self._init = AgentInit(self._config)
@@ -56,21 +56,19 @@ class Agent:
             self._init.init_propagation()
             load_observability_plugins(self._config)
             self._initialized = True
+            logger.debug("Platform: %s", distro.id())
+            logger.debug("Platform version: %s", distro.version())
+            logger.debug('Harness SDK version: %s', __version__)
+            logger.debug("successfully initialized harness sdk")
+            if hasattr(os, 'register_at_fork'):
+                logger.info('Registering after_in_child handler.')
+                os.register_at_fork(after_in_child=self.post_fork)  # pylint:disable=E1101
         except Exception as err:  # pylint: disable=W0703
             logger.error(
                 'Failed to initialize Agent: exception=%s, stacktrace=%s',
                 err,
                 traceback.format_exc(),
             )
-        self.is_lambda = False
-        logger.debug("Platform: %s", distro.id())
-        logger.debug("Platform version: %s", distro.version())
-        logger.debug('Harness SDK version: %s', __version__)
-        logger.debug("successfully initialized harness sdk")
-
-        if hasattr(os, 'register_at_fork'):
-            logger.info('Registering after_in_child handler.')
-            os.register_at_fork(after_in_child=self.post_fork)  # pylint:disable=E1101
 
     def post_fork(self):
         logger.info("In post fork hook")

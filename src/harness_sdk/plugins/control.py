@@ -1,6 +1,7 @@
 """Control plugin protocol and registry for request/span policy evaluation."""
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Protocol, runtime_checkable
 
@@ -60,10 +61,13 @@ class ControlRegistry:
     """Singleton registry that chains control plugins (short-circuit on block)."""
 
     _instance: Optional["ControlRegistry"] = None
+    _singleton_lock: threading.Lock = threading.Lock()
 
     def __new__(cls) -> "ControlRegistry":
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
+            with cls._singleton_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(self) -> None:

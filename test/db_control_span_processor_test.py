@@ -2,13 +2,13 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from opentelemetry.sdk.trace import TracerProvider
-from harness_sdk.sampling_span_processor import SamplingSpanProcessor
+from harness_sdk.db_control_span_processor import DbControlSpanProcessor
 
 
-class TestSamplingSpanProcessor(unittest.TestCase):
+class TestDbControlSpanProcessor(unittest.TestCase):
     def setUp(self):
         self.mock_processor = MagicMock()
-        self.sampling_processor = SamplingSpanProcessor(processor=self.mock_processor)
+        self.processor = DbControlSpanProcessor(processor=self.mock_processor)
         self.tracer_provider = TracerProvider()
         self.tracer = self.tracer_provider.get_tracer(__name__)
 
@@ -34,14 +34,14 @@ class TestSamplingSpanProcessor(unittest.TestCase):
         span = self.create_test_span()
         parent_context = MagicMock()
 
-        self.sampling_processor.on_start(span, parent_context)
+        self.processor.on_start(span, parent_context)
 
         self.mock_processor.on_start.assert_called_once_with(span, parent_context)
 
     def test_non_db_span_is_passed_through(self):
         span = self.create_test_span({"other_attr": "value"})
 
-        self.sampling_processor.on_end(span)
+        self.processor.on_end(span)
 
         self.mock_processor.on_end.assert_called_once_with(span)
         self.mock_registry.evaluate.assert_not_called()
@@ -56,7 +56,7 @@ class TestSamplingSpanProcessor(unittest.TestCase):
         mock_filter_result.block = False
         self.mock_registry.evaluate.return_value = mock_filter_result
 
-        self.sampling_processor.on_end(span)
+        self.processor.on_end(span)
 
         self.mock_registry.evaluate.assert_called_once_with(
             span, "", {}, "SELECT * FROM users", False
@@ -73,7 +73,7 @@ class TestSamplingSpanProcessor(unittest.TestCase):
         mock_filter_result.block = False
         self.mock_registry.evaluate.return_value = mock_filter_result
 
-        self.sampling_processor.on_end(span)
+        self.processor.on_end(span)
 
         self.mock_registry.evaluate.assert_called_once_with(
             span, "", {}, "INSERT INTO users VALUES (1, 'test')", False
@@ -90,7 +90,7 @@ class TestSamplingSpanProcessor(unittest.TestCase):
         mock_filter_result.block = True
         self.mock_registry.evaluate.return_value = mock_filter_result
 
-        self.sampling_processor.on_end(span)
+        self.processor.on_end(span)
 
         self.mock_registry.evaluate.assert_called_once()
         self.mock_processor.on_end.assert_not_called()
@@ -104,7 +104,7 @@ class TestSamplingSpanProcessor(unittest.TestCase):
         mock_filter_result.block = False
         self.mock_registry.evaluate.return_value = mock_filter_result
 
-        self.sampling_processor.on_end(span)
+        self.processor.on_end(span)
 
         self.mock_registry.evaluate.assert_called_once_with(
             span, "", {}, "", False
@@ -119,15 +119,15 @@ class TestSamplingSpanProcessor(unittest.TestCase):
 
         self.mock_registry.evaluate.side_effect = Exception("Test exception")
 
-        self.sampling_processor.on_end(span)
+        self.processor.on_end(span)
 
         self.mock_processor.on_end.assert_called_once_with(span)
 
     def test_force_flush_delegates_to_processor(self):
         timeout = 5000
-        self.sampling_processor.force_flush(timeout)
+        self.processor.force_flush(timeout)
         self.mock_processor.force_flush.assert_called_once_with(timeout)
 
     def test_shutdown_delegates_to_processor(self):
-        self.sampling_processor.shutdown()
+        self.processor.shutdown()
         self.mock_processor.shutdown.assert_called_once()
