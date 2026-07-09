@@ -166,6 +166,57 @@ async def test_litellm_async_completion_span(agent, exporter, litellm_instrument
     assert attrs.get("gen_ai.usage.total_tokens") == 8
 
 
+def test_litellm_streaming_span_defers_until_consumed(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
+    litellm_instrumentor.instrument()
+    stream = litellm.completion(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": "hi"}],
+        stream=True,
+        stream_options={"include_usage": True},
+        mock_response="hello world",
+    )
+
+    # The span must NOT be finished before the stream is consumed: this is the
+    # core bug this fix addresses.
+    assert len(_litellm_spans(exporter.get_finished_spans())) == 0
+
+    chunks = list(stream)
+    assert len(chunks) > 0
+
+    spans = _litellm_spans(exporter.get_finished_spans())
+    exporter.clear()
+    assert len(spans) == 1
+    attrs = spans[0].attributes
+    assert attrs.get("gen_ai.request.model") == "gpt-4o-mini"
+    assert attrs.get("gen_ai.request.streaming") == "True"
+    # Response-side metadata is aggregated from the streamed chunks.
+    assert attrs.get("gen_ai.response.finish_reasons") == "['stop']"
+
+
+@pytest.mark.asyncio
+async def test_litellm_async_streaming_span_defers_until_consumed(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
+    litellm_instrumentor.instrument()
+    stream = await litellm.acompletion(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": "hi"}],
+        stream=True,
+        stream_options={"include_usage": True},
+        mock_response="hello world",
+    )
+
+    assert len(_litellm_spans(exporter.get_finished_spans())) == 0
+
+    chunks = [chunk async for chunk in stream]
+    assert len(chunks) > 0
+
+    spans = _litellm_spans(exporter.get_finished_spans())
+    exporter.clear()
+    assert len(spans) == 1
+    attrs = spans[0].attributes
+    assert attrs.get("gen_ai.request.streaming") == "True"
+    assert attrs.get("gen_ai.response.finish_reasons") == "['stop']"
+
+
 def test_litellm_double_instrument_is_noop(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
     with patch("litellm.main.completion", new=_fake_model_response):
         litellm_instrumentor.instrument()

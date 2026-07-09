@@ -10,6 +10,14 @@ Wraps the public entry points so evaluation runs on an active span before the
 provider call. The wrapper enriches that span with response metadata before it
 ends.
 
+Streaming (``stream=True``) is handled by deferring span completion: the
+returned LiteLLM ``CustomStreamWrapper`` is wrapped in a transparent proxy that
+forwards every chunk to the caller, accumulates them, and only when the stream
+is fully consumed (or errors) rebuilds the aggregated response, copies response
+metadata (usage, id, finish reasons) onto the span, and ends it. Without this
+the span would close as soon as ``completion()`` returned the not-yet-consumed
+stream object, losing all response-side telemetry.
+
 Optional: ``pip install harness-sdk[litellm]``
 """
 
@@ -463,6 +471,140 @@ def _set_response_attributes(
     )
 
 
+def _is_stream_response(response: Any) -> bool:
+    """Detect a LiteLLM streaming response (``CustomStreamWrapper``).
+
+    Falls back to duck-typing on the async/sync iterator protocol so that the
+    check still works if LiteLLM renames or relocates the wrapper class.
+    """
+    try:
+        from litellm import CustomStreamWrapper  # pylint: disable=import-outside-toplevel
+
+        if isinstance(response, CustomStreamWrapper):
+            return True
+    except Exception:  # pylint: disable=broad-except
+        pass
+    # ModelResponse / EmbeddingResponse are not iterators; a streaming response
+    # exposes __anext__ (async) or __next__ (sync).
+    return hasattr(response, "__anext__") or hasattr(response, "__next__")
+
+
+def _aggregate_stream_response(chunks: list[Any], messages: Any) -> Any:
+    """Rebuild a complete ``ModelResponse`` from streamed chunks.
+
+    Uses ``litellm.stream_chunk_builder`` (the same helper LiteLLM uses
+    internally) so usage, choices, finish_reason and content are aggregated
+    exactly as they would be for a non-streaming call. Falls back to the last
+    chunk that carries usage if the builder is unavailable or fails.
+    """
+    if not chunks:
+        return None
+    try:
+        import litellm  # pylint: disable=import-outside-toplevel
+
+        builder_messages = messages if isinstance(messages, list) else None
+        aggregated = litellm.stream_chunk_builder(chunks, messages=builder_messages)
+        if aggregated is not None:
+            return aggregated
+    except Exception as err:  # pylint: disable=broad-except
+        logger.debug("LiteLLM: stream_chunk_builder failed: %s", err)
+    for chunk in reversed(chunks):
+        if _get_value(chunk, "usage") is not None:
+            return chunk
+    return chunks[-1]
+
+
+class _StreamSpanWrapper(wrapt.ObjectProxy):
+    """Transparent proxy over a LiteLLM stream that defers span completion.
+
+    Forwards every chunk to the caller unchanged while collecting them. When the
+    stream is exhausted (or raises) it aggregates the chunks, enriches the span
+    with response metadata, and ends the span. Attribute access and any other
+    protocol falls through to the wrapped ``CustomStreamWrapper`` via
+    ``wrapt.ObjectProxy``.
+    """
+
+    def __init__(
+        self,
+        wrapped: Any,
+        otel_logger: Any,
+        span: Any,
+        request_model: Optional[str],
+        messages: Any,
+    ) -> None:
+        super().__init__(wrapped)
+        self._self_otel_logger = otel_logger
+        self._self_span = span
+        self._self_request_model = request_model
+        self._self_messages = messages
+        self._self_chunks: list[Any] = []
+        self._self_finished = False
+
+    def __iter__(self) -> "_StreamSpanWrapper":
+        return self
+
+    def __next__(self) -> Any:
+        try:
+            chunk = self.__wrapped__.__next__()
+        except StopIteration:
+            self._finalize(None)
+            raise
+        except BaseException as exc:  # pylint: disable=broad-except
+            self._finalize(exc)
+            raise
+        self._self_chunks.append(chunk)
+        return chunk
+
+    def __aiter__(self) -> "_StreamSpanWrapper":
+        return self
+
+    async def __anext__(self) -> Any:
+        try:
+            chunk = await self.__wrapped__.__anext__()
+        except StopAsyncIteration:
+            self._finalize(None)
+            raise
+        except BaseException as exc:  # pylint: disable=broad-except
+            self._finalize(exc)
+            raise
+        self._self_chunks.append(chunk)
+        return chunk
+
+    def _finalize(self, exc: Optional[BaseException]) -> None:
+        if self._self_finished:
+            return
+        self._self_finished = True
+        try:
+            if exc is not None:
+                self._self_span.record_exception(exc)
+                self._self_span.set_status(Status(StatusCode.ERROR, str(exc)))
+            else:
+                aggregated = _aggregate_stream_response(
+                    self._self_chunks, self._self_messages
+                )
+                if aggregated is not None:
+                    _set_response_attributes(
+                        self._self_otel_logger,
+                        self._self_span,
+                        aggregated,
+                        request_model=self._self_request_model,
+                    )
+        except Exception as err:  # pylint: disable=broad-except
+            logger.debug("LiteLLM: failed to finalize stream span: %s", err)
+        finally:
+            self._self_span.end()
+
+    def __del__(self) -> None:
+        # Safety net: if the consumer abandoned the stream before exhausting it,
+        # still end the span (with whatever chunks were collected) so it is not
+        # leaked/never exported.
+        try:
+            if not self._self_finished:
+                self._finalize(None)
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+
 def _build_traceable_otel_class() -> type:
     from litellm.integrations.opentelemetry import (  # pylint: disable=import-outside-toplevel
         OpenTelemetry,
@@ -595,6 +737,29 @@ class _LiteLLMSpanRun:
             self.otel_logger, self.span, response, request_model=self.request_model
         )
 
+    def wrap_stream(self, response: Any) -> Any:
+        """Hand span ownership to a stream proxy and stop managing it here.
+
+        Detaches the active context and clears the re-dispatch guard without
+        ending the span, then returns a proxy that ends the span once the
+        stream is consumed. The context manager ``__exit__`` becomes a no-op for
+        the span because ``token``/``guard`` are cleared.
+        """
+        if self.guard is not None:
+            _LITELLM_SPAN_ACTIVE.reset(self.guard)
+            self.guard = None
+        if self.token is not None:
+            otel_context.detach(self.token)
+            self.token = None
+        _, payload = _extract_model_and_input(self.args, self.kwargs)
+        return _StreamSpanWrapper(
+            response,
+            self.otel_logger,
+            self.span,
+            self.request_model,
+            payload,
+        )
+
     def __exit__(
         self,
         _exc_type: Optional[type[BaseException]],
@@ -632,6 +797,8 @@ def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
 
         with _LiteLLMSpanRun(otel_logger, func_name, args, kwargs) as span_run:
             response = wrapped(*args, **kwargs)
+            if _is_stream_response(response):
+                return span_run.wrap_stream(response)
             span_run.set_response_attributes(response)
             return response
 
@@ -649,6 +816,8 @@ def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
 
         with _LiteLLMSpanRun(otel_logger, func_name, args, kwargs) as span_run:
             response = await wrapped(*args, **kwargs)
+            if _is_stream_response(response):
+                return span_run.wrap_stream(response)
             span_run.set_response_attributes(response)
             return response
 
