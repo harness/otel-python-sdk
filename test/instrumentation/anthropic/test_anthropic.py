@@ -11,11 +11,12 @@ import pytest
 
 pytest.importorskip("anthropic")
 
-from anthropic import Anthropic, AsyncAnthropic
+from anthropic import Anthropic, AnthropicVertex, AsyncAnthropic
 from anthropic.resources.messages import AsyncMessages, Messages
 
 from harness_sdk.plugins.control import ControlResult, get_control_registry
 from harness_sdk.gen_ai.exceptions import ControlEvaluationBlocked
+from harness_sdk.instrumentation import anthropic as anthropic_instrumentation
 from harness_sdk.instrumentation.anthropic import AnthropicInstrumentorWrapper
 
 
@@ -48,6 +49,34 @@ def _fake_messages_create(_self, *_args, **_kwargs):
     return _FakeMessage()
 
 
+def test_resolve_provider_detects_anthropic_vertex():
+    vertex_client = type("AnthropicVertex", (SimpleNamespace,), {})()
+    messages = SimpleNamespace(_client=vertex_client)
+
+    assert anthropic_instrumentation._resolve_provider(messages) == "gcp.vertex_ai"
+
+
+def test_resolve_provider_defaults_to_anthropic():
+    anthropic_client = type("Anthropic", (SimpleNamespace,), {})()
+    messages = SimpleNamespace(_client=anthropic_client)
+
+    assert anthropic_instrumentation._resolve_provider(messages) == "anthropic"
+
+
+def test_apply_vertex_client_attributes():
+    vertex_client = type("AnthropicVertex", (SimpleNamespace,), {})(
+        project_id="my-proj",
+        region="us-east5",
+    )
+    messages = SimpleNamespace(_client=vertex_client)
+    attributes = {}
+
+    anthropic_instrumentation._apply_vertex_client_attributes(attributes, messages)
+
+    assert attributes["gcp.project"] == "my-proj"
+    assert attributes["gcp.location"] == "us-east5"
+
+
 def test_anthropic_span_has_gen_ai_attributes(agent, exporter, anthropic_instrumentor):
     with patch.object(Messages, "create", new=_fake_messages_create):
         anthropic_instrumentor.instrument()
@@ -63,11 +92,33 @@ def test_anthropic_span_has_gen_ai_attributes(agent, exporter, anthropic_instrum
     assert len(spans) == 1
     attrs = spans[0].attributes
     assert attrs.get("gen_ai.system") == "anthropic"
+    assert attrs.get("gen_ai.provider.name") == "anthropic"
     assert attrs.get("gen_ai.operation.name") == "chat"
     assert attrs.get("gen_ai.request.model") == "claude-3-haiku-20240307"
     assert attrs.get("gen_ai.response.id") == "msg_test"
     assert attrs.get("gen_ai.usage.input_tokens") == 2
     assert attrs.get("gen_ai.usage.output_tokens") == 4
+
+
+def test_anthropic_vertex_span_has_provider_and_gcp_attributes(
+    agent, exporter, anthropic_instrumentor
+):
+    with patch.object(Messages, "create", new=_fake_messages_create):
+        anthropic_instrumentor.instrument()
+        client = AnthropicVertex(project_id="my-proj", region="us-east5")
+        client.messages.create(
+            model="claude-3-5-sonnet@20240620",
+            max_tokens=10,
+            messages=[{"role": "user", "content": "hello"}],
+        )
+
+    spans = exporter.get_finished_spans()
+    exporter.clear()
+    assert len(spans) == 1
+    attrs = spans[0].attributes
+    assert attrs.get("gen_ai.provider.name") == "gcp.vertex_ai"
+    assert attrs.get("gcp.project") == "my-proj"
+    assert attrs.get("gcp.location") == "us-east5"
 
 
 async def test_async_messages_create_span_has_gen_ai_attributes(agent, exporter, anthropic_instrumentor):
