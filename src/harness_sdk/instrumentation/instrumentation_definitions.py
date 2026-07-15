@@ -18,6 +18,7 @@ BOTOCORE = 'botocore'
 ANTHROPIC_KEY = 'anthropic'
 OPENAI_KEY = 'openai'
 LITELLM_KEY = 'litellm'
+GOOGLE_GENAI_KEY = 'google_genai'
 MCP_KEY = 'mcp'
 
 SUPPORTED_LIBRARIES = [
@@ -29,6 +30,7 @@ SUPPORTED_LIBRARIES = [
     ANTHROPIC_KEY,
     OPENAI_KEY,
     LITELLM_KEY,
+    GOOGLE_GENAI_KEY,
     MCP_KEY,
 ]
 
@@ -84,6 +86,7 @@ _WRAPPER_MODULE_AND_CLASS = {
     ANTHROPIC_KEY: ("harness_sdk.instrumentation.anthropic", "AnthropicInstrumentorWrapper"),
     OPENAI_KEY: ("harness_sdk.instrumentation.openai", "OpenAIInstrumentorWrapper"),
     LITELLM_KEY: ("harness_sdk.instrumentation.litellm", "LiteLLMInstrumentorWrapper"),
+    GOOGLE_GENAI_KEY: ("harness_sdk.instrumentation.google_genai", "GoogleGenAIInstrumentorWrapper"),
     MCP_KEY: ("harness_sdk.instrumentation.mcp", "McpInstrumentorWrapper"),
 }
 

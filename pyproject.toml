@@ -44,6 +44,7 @@ dependencies = [
 anthropic = ["anthropic>=0.34.0"]
 openai = ["openai>=1.40.0"]
 litellm = ["litellm>=1.60.0"]
+google-genai = ["google-genai>=1.0.0"]
 dev = [
     "pytest==7.4.3",
     "pytest-cov==3.0.0",
@@ -63,6 +64,7 @@ dev = [
     "anthropic>=0.34.0",
     "openai>=1.40.0",
     "litellm>=1.60.0",
+    "google-genai>=1.0.0",
     "grpcio",
 ]
 

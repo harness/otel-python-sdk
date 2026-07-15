@@ -6,7 +6,7 @@ Generic Python agent SDK with OpenTelemetry instrumentation and a plugin archite
 
 ```bash
 bash scripts/fetch-vendor.sh
-pip install -e ".[dev,anthropic,openai,litellm]"
+pip install -e ".[dev,anthropic,google-genai,openai,litellm]"
 ./scripts/run-unit-tests.sh
 ```
 
@@ -55,7 +55,7 @@ pip install harness-sdk
 Optional instrumentation extras:
 
 ```bash
-pip install "harness-sdk[anthropic,openai,litellm]"
+pip install "harness-sdk[anthropic,google-genai,openai,litellm]"
 ```
 
 ### From TestPyPI (release candidates)
@@ -75,7 +75,7 @@ With optional extras:
 pip install \
   --index-url https://test.pypi.org/simple/ \
   --extra-index-url https://pypi.org/simple/ \
-  "harness-sdk[anthropic,openai,litellm]==1.0.0-rc.1"
+  "harness-sdk[anthropic,google-genai,openai,litellm]==1.0.0-rc.1"
 ```
 
 Pin the version to the RC you want (see [published files](https://test.pypi.org/project/harness-sdk/#history) on TestPyPI). The version string matches the tag without the leading `v` (tag `v1.0.0-rc.1` → `1.0.0-rc.1`). In a virtualenv or `requirements.txt`, the same flags apply:
