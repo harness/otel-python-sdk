@@ -6,11 +6,8 @@ from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from harness_sdk.plugins.control import get_control_registry
 from harness_sdk.instrumentation import BaseInstrumentorWrapper
 from harness_sdk.instrumentation.httpx.utils import (
-    decode_response_body_for_capture,
     headers_from_httpx,
     read_request_body,
-    read_response_body,
-    read_response_body_async,
     url_from_request_info,
 )
 
@@ -26,6 +23,7 @@ class HTTPXClientInstrumentorWrapper(HTTPXClientInstrumentor, BaseInstrumentorWr
         logger.debug('Entering HTTPXClientInstrumentorWrapper.__init__().')
         HTTPXClientInstrumentor.__init__(self)
         BaseInstrumentorWrapper.__init__(self)
+        self._process_response_body = False
 
     def _instrument(self, **kwargs) -> None:
         '''Enable instrumentation with request/response hooks.'''
@@ -46,22 +44,14 @@ class HTTPXClientInstrumentorWrapper(HTTPXClientInstrumentor, BaseInstrumentorWr
 
     def _process_response(self, span, response_info):
         headers = headers_from_httpx(response_info.headers)
-        body = read_response_body(response_info.stream)
-        body = decode_response_body_for_capture(headers, body)
-        self.generic_response_handler(headers, body, span)
-
-    async def _process_response_async(self, span, response_info):
-        headers = headers_from_httpx(response_info.headers)
-        body = await read_response_body_async(response_info.stream)
-        body = decode_response_body_for_capture(headers, body)
-        self.generic_response_handler(headers, body, span)
+        self.generic_response_handler(headers, None, span)
 
     def request_hook(self, span, request_info):
         '''Capture sync client request data and run evaluation.'''
         self._process_request(span, request_info)
 
     def response_hook(self, span, request_info, response_info):  # pylint: disable=unused-argument
-        '''Capture sync client response data.'''
+        '''Capture sync client response headers.'''
         self._process_response(span, response_info)
 
     async def async_request_hook(self, span, request_info):
@@ -69,5 +59,5 @@ class HTTPXClientInstrumentorWrapper(HTTPXClientInstrumentor, BaseInstrumentorWr
         self._process_request(span, request_info)
 
     async def async_response_hook(self, span, request_info, response_info):  # pylint: disable=unused-argument
-        '''Capture async client response data.'''
-        await self._process_response_async(span, response_info)
+        '''Capture async client response headers.'''
+        self._process_response(span, response_info)
