@@ -5,6 +5,7 @@ for all span/metric/event telemetry, plus Traceable pre-call policy evaluation.
 Coverage:
   - Messages.create / AsyncMessages.create  (non-streaming and stream=True)
   - Messages.stream  / AsyncMessages.stream  (MessageStream API)
+  - AnthropicVertex / AsyncAnthropicVertex, including LangChain ChatAnthropicVertex
 
 The OTEL contrib ``AnthropicInstrumentor.instrument()`` only handles non-streaming
 ``Messages.create``; we call its inner ``messages_create(handler)`` wrapper directly
@@ -45,7 +46,32 @@ from harness_sdk.instrumentation import BaseInstrumentorWrapper
 logger = get_custom_logger(__name__)
 
 _ANTHROPIC_MESSAGES_MODULE = "anthropic.resources.messages"
-_ANTHROPIC = "anthropic"
+_PROVIDER_ANTHROPIC = "anthropic"
+_PROVIDER_VERTEX = "gcp.vertex_ai"
+
+
+def _resolve_provider(messages_instance: Any) -> str:
+    """Detect AnthropicVertex vs direct Anthropic API from Messages._client."""
+    client = getattr(messages_instance, "_client", None)
+    if client is None:
+        return _PROVIDER_ANTHROPIC
+    cls_name = type(client).__name__
+    if cls_name in ("AnthropicVertex", "AsyncAnthropicVertex"):
+        return _PROVIDER_VERTEX
+    return _PROVIDER_ANTHROPIC
+
+
+def _apply_vertex_client_attributes(attributes: dict[str, Any], messages_instance: Any) -> None:
+    """Best-effort gcp.project / gcp.location from AnthropicVertex client."""
+    client = getattr(messages_instance, "_client", None)
+    if client is None:
+        return
+    project = getattr(client, "project_id", None)
+    region = getattr(client, "region", None)
+    if project:
+        attributes["gcp.project"] = project
+    if region:
+        attributes["gcp.location"] = region
 
 
 def _get_handler() -> TelemetryHandler:
@@ -85,11 +111,14 @@ def _build_invocation(
     capture_content: bool,
 ) -> LLMInvocation:
     attributes = get_llm_request_attributes(params, instance)
+    provider = _resolve_provider(instance)
+    if provider == _PROVIDER_VERTEX:
+        _apply_vertex_client_attributes(attributes, instance)
     model_attr = attributes.get("gen_ai.request.model")
     request_model = model_attr if isinstance(model_attr, str) else params.model
     invocation = LLMInvocation(
         request_model=request_model,
-        provider=_ANTHROPIC,
+        provider=provider,
         input_messages=get_input_messages(params.messages) if capture_content else [],
         system_instruction=get_system_instruction(params.system) if capture_content else [],
         attributes=attributes,
