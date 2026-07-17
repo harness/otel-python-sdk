@@ -23,6 +23,7 @@ class HTTPXClientInstrumentorWrapper(HTTPXClientInstrumentor, BaseInstrumentorWr
         logger.debug('Entering HTTPXClientInstrumentorWrapper.__init__().')
         HTTPXClientInstrumentor.__init__(self)
         BaseInstrumentorWrapper.__init__(self)
+        self._process_response_body = False
 
     def _instrument(self, **kwargs) -> None:
         '''Enable instrumentation with request/response hooks.'''
