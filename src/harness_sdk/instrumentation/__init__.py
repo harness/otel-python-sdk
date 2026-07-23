@@ -21,6 +21,24 @@ class BaseInstrumentorWrapper:
     RPC_REQUEST_BODY_PREFIX = 'rpc.request.body'
     RPC_RESPONSE_BODY_PREFIX = 'rpc.response.body'
 
+    # Headers/metadata whose values are credentials or session secrets and must
+    # never be exported verbatim in telemetry. Compared case-insensitively.
+    SENSITIVE_HEADERS = frozenset({
+        'authorization',
+        'proxy-authorization',
+        'x-api-key',
+        'api-key',
+        'apikey',
+        'x-auth-token',
+        'x-amz-security-token',
+        'x-goog-api-key',
+        'cookie',
+        'set-cookie',
+        'x-harness-service-token',
+        'x-harness-token',
+    })
+    REDACTED_VALUE = '[REDACTED]'
+
     # Constructor
     def __init__(self):
         '''constructor'''
@@ -41,10 +59,19 @@ class BaseInstrumentorWrapper:
         '''convert all headers to lowercase'''
         return {k.lower(): v for k, v in headers.items()}
 
+    def _redact_if_sensitive(self, header_key: str, header_value):
+        '''Return the header value, redacted if the header is credential-bearing.'''
+        if header_key.lower() in self.SENSITIVE_HEADERS:
+            return self.REDACTED_VALUE
+        return header_value
+
     def add_headers_to_span(self, prefix: str, span: Span, headers: dict):
-        '''set header attributes on the span'''
+        '''set header attributes on the span, redacting sensitive header values'''
         for header_key, header_value in headers.items():
-            span.set_attribute(f"{prefix}{header_key}", header_value)
+            span.set_attribute(
+                f"{prefix}{header_key}",
+                self._redact_if_sensitive(header_key, header_value),
+            )
 
     def eligible_based_on_content_type(self, headers: dict):
         '''find content-type in headers'''
