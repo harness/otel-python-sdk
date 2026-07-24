@@ -137,10 +137,6 @@ def _make_create_sync(handler: TelemetryHandler) -> Callable[..., Any]:
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
-        if not Config().config.gen_ai.enabled.value:
-            logger.debug("Anthropic Messages.create (sync): gen_ai disabled, passthrough")
-            return wrapped(*args, **kwargs)
-
         is_streaming = kwargs.get("stream") is True
         logger.debug("Anthropic Messages.create (sync): streaming=%s", is_streaming)
         params = extract_params(**kwargs)
@@ -181,10 +177,6 @@ def _make_create_async(handler: TelemetryHandler) -> Callable[..., Any]:
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
-        if not Config().config.gen_ai.enabled.value:
-            logger.debug("Anthropic Messages.create (async): gen_ai disabled, passthrough")
-            return await wrapped(*args, **kwargs)
-
         is_streaming = kwargs.get("stream") is True
         logger.debug("Anthropic Messages.create (async): streaming=%s", is_streaming)
         params = extract_params(**kwargs)
@@ -277,10 +269,6 @@ def _make_stream_sync(handler: TelemetryHandler) -> Callable[..., Any]:
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
-        if not Config().config.gen_ai.enabled.value:
-            logger.debug("Anthropic Messages.stream (sync): gen_ai disabled, passthrough")
-            return wrapped(*args, **kwargs)
-
         merged_kwargs = dict(kwargs)
         merged_kwargs["stream"] = True
         params = extract_params(**merged_kwargs)
@@ -314,10 +302,6 @@ def _make_stream_async(handler: TelemetryHandler) -> Callable[..., Any]:
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
-        if not Config().config.gen_ai.enabled.value:
-            logger.debug("Anthropic Messages.stream (async): gen_ai disabled, passthrough")
-            return wrapped(*args, **kwargs)
-
         merged_kwargs = dict(kwargs)
         merged_kwargs["stream"] = True
         params = extract_params(**merged_kwargs)
@@ -352,9 +336,6 @@ class AnthropicInstrumentorWrapper(BaseInstrumentorWrapper):
     def instrument(self, **_kwargs: Any) -> None:
         if self._applied:
             logger.debug("Anthropic instrumentation already applied.")
-            return
-        if not Config().config.gen_ai.enabled.value:
-            logger.debug("Gen AI instrumentation disabled; skip Anthropic wraps.")
             return
         try:
             handler = _get_handler()

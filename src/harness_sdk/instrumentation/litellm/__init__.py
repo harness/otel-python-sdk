@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import contextvars
 import json
-import os
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
@@ -37,6 +36,7 @@ from opentelemetry.trace import Status, StatusCode
 
 from harness_sdk.config.config import Config
 from harness_sdk.custom_logger import get_custom_logger
+from harness_sdk.env import get_env_value
 from harness_sdk.plugins.control import get_control_registry
 from harness_sdk.gen_ai.exceptions import ControlEvaluationBlocked
 from harness_sdk.instrumentation import BaseInstrumentorWrapper
@@ -50,10 +50,11 @@ _LITELLM_SPAN_ACTIVE: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "harness_litellm_span_active", default=False
 )
 
-# Env var to opt into bounded raw response/usage capture as a resilience fallback
-# when LiteLLM changes response object shape or field names.
-_RAW_CAPTURE_ENV = "HA_GEN_AI_RAW_CAPTURE_ENABLED"
-_RAW_CAPTURE_MAX_BYTES_ENV = "HA_GEN_AI_RAW_CAPTURE_MAX_BYTES"
+# Env keys (resolved with HARNESS_/HA_/AT_/TA_ precedence) to opt into bounded raw
+# response/usage capture as a resilience fallback when LiteLLM changes response
+# object shape or field names.
+_RAW_CAPTURE_ENV = "GEN_AI_RAW_CAPTURE_ENABLED"
+_RAW_CAPTURE_MAX_BYTES_ENV = "GEN_AI_RAW_CAPTURE_MAX_BYTES"
 _RAW_CAPTURE_DEFAULT_MAX_BYTES = 8192
 
 # Fields that must never be serialized into the raw usage/response fallback.
@@ -326,11 +327,11 @@ def _is_bedrock_model_id_header(key: Any) -> bool:
 
 
 def _raw_capture_enabled() -> bool:
-    return os.getenv(_RAW_CAPTURE_ENV, "").strip().lower() == "true"
+    return (get_env_value(_RAW_CAPTURE_ENV) or "").strip().lower() == "true"
 
 
 def _raw_capture_max_bytes() -> int:
-    raw = os.getenv(_RAW_CAPTURE_MAX_BYTES_ENV, "").strip()
+    raw = (get_env_value(_RAW_CAPTURE_MAX_BYTES_ENV) or "").strip()
     if not raw:
         return _RAW_CAPTURE_DEFAULT_MAX_BYTES
     try:
@@ -787,9 +788,6 @@ def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
-        if not Config().config.gen_ai.enabled.value:
-            return wrapped(*args, **kwargs)
-
         # Skip nested re-dispatch (e.g. aembedding -> embedding) so each provider
         # call yields exactly one litellm_request span.
         if _LITELLM_SPAN_ACTIVE.get():
@@ -808,9 +806,6 @@ def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
-        if not Config().config.gen_ai.enabled.value:
-            return await wrapped(*args, **kwargs)
-
         if _LITELLM_SPAN_ACTIVE.get():
             return await wrapped(*args, **kwargs)
 
@@ -835,9 +830,6 @@ class LiteLLMInstrumentorWrapper(BaseInstrumentorWrapper):
     def instrument(self, **_kwargs: Any) -> None:
         if self._applied:
             logger.debug("LiteLLM instrumentation already applied.")
-            return
-        if not Config().config.gen_ai.enabled.value:
-            logger.debug("Gen AI instrumentation disabled; skip LiteLLM wraps.")
             return
         try:
             import litellm  # pylint: disable=import-outside-toplevel

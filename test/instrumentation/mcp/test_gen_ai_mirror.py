@@ -48,15 +48,6 @@ def test_mirror_tool_name_and_mcp_method(mock_gen_ai_config):
     span.set_attribute.assert_any_call(AiSpanAttributes.MCP_METHOD_NAME, "tools/call")
 
 
-def test_mirror_skips_when_gen_ai_disabled(mock_gen_ai_config):
-    mock_gen_ai_config.enabled.value = False
-    span = MagicMock()
-    mirror_traceloop_to_gen_ai(
-        span, AiSpanAttributes.TRACELOOP_SPAN_KIND, TraceloopSpanKindValues.TOOL.value, None
-    )
-    span.set_attribute.assert_not_called()
-
-
 def test_mirror_arguments_when_capture_and_eval(mock_gen_ai_config):
     span = MagicMock()
     kind = TraceloopSpanKindValues.TOOL.value
