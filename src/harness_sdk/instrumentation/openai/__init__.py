@@ -88,10 +88,6 @@ def _make_chat_create_sync(handler: TelemetryHandler, capture_content: bool) -> 
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
-        if not Config().config.gen_ai.enabled.value:
-            logger.debug("OpenAI Completions.create (sync): gen_ai disabled, passthrough")
-            return wrapped(*args, **kwargs)
-
         invocation = handler.start_llm(
             create_chat_invocation(kwargs, instance, capture_content=capture_content)
         )
@@ -130,10 +126,6 @@ def _make_chat_create_async(handler: TelemetryHandler, capture_content: bool) ->
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
-        if not Config().config.gen_ai.enabled.value:
-            logger.debug("OpenAI AsyncCompletions.create (async): gen_ai disabled, passthrough")
-            return await wrapped(*args, **kwargs)
-
         invocation = handler.start_llm(
             create_chat_invocation(kwargs, instance, capture_content=capture_content)
         )
@@ -170,9 +162,6 @@ def _make_embeddings_create_sync(handler: TelemetryHandler) -> Callable[..., Any
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
-        if not Config().config.gen_ai.enabled.value:
-            return wrapped(*args, **kwargs)
-
         address, port = get_server_address_and_port(instance)
         invocation = handler.start_embedding(
             "openai",
@@ -219,9 +208,6 @@ def _make_embeddings_create_async(handler: TelemetryHandler) -> Callable[..., An
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
-        if not Config().config.gen_ai.enabled.value:
-            return await wrapped(*args, **kwargs)
-
         address, port = get_server_address_and_port(instance)
         invocation = handler.start_embedding(
             "openai",
@@ -272,9 +258,6 @@ class OpenAIInstrumentorWrapper(BaseInstrumentorWrapper):
     def instrument(self, **_kwargs: Any) -> None:
         if self._applied:
             logger.debug("OpenAI instrumentation already applied.")
-            return
-        if not Config().config.gen_ai.enabled.value:
-            logger.debug("Gen AI instrumentation disabled; skip OpenAI wraps.")
             return
         try:
             handler = _get_handler()

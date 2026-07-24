@@ -1,5 +1,5 @@
 """Tests for :class:`harness_sdk.instrumentation.mcp.McpInstrumentorWrapper`."""
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from opentelemetry.instrumentation.mcp import McpInstrumentor
@@ -9,30 +9,9 @@ from harness_sdk.instrumentation.mcp import McpInstrumentorWrapper
 
 @pytest.fixture
 def gen_ai_enabled():
-    gen = MagicMock()
-    gen.enabled.value = True
-    gen.payload_capture_enabled.value = True
-    gen.payload_evaluation_enabled.value = True
-    root = MagicMock()
-    root.config.gen_ai = gen
-    with patch("harness_sdk.instrumentation.mcp.Config") as mock_cfg:
-        mock_cfg.return_value = root
-        yield gen
-
-
-def test_mcp_wrapper_skips_when_gen_ai_disabled():
-    gen = MagicMock()
-    gen.enabled.value = False
-    root = MagicMock()
-    root.config.gen_ai = gen
-    with patch("harness_sdk.instrumentation.mcp.Config") as mock_cfg:
-        mock_cfg.return_value = root
-        with patch("harness_sdk.instrumentation.mcp.apply_gen_ai_env_for_mcp") as mock_apply:
-            with patch.object(McpInstrumentor, "_instrument") as parent_instr:
-                w = McpInstrumentorWrapper()
-                w._instrument()
-    mock_apply.assert_not_called()
-    parent_instr.assert_not_called()
+    # MCP instrumentation is now gated by HARNESS_ENABLE_AI_MCP at the Agent level;
+    # the wrapper itself no longer consults Config for an enable flag.
+    yield
 
 
 def test_mcp_wrapper_restores_get_tracer_after_instrument(gen_ai_enabled):

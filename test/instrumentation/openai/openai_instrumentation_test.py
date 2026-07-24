@@ -317,8 +317,9 @@ def test_double_instrument_is_noop(agent, exporter, openai_instrumentor):  # pyl
     assert len(spans) == 1
 
 
-def test_gen_ai_disabled_passthrough_chat(agent, exporter, openai_instrumentor):  # pylint: disable=unused-argument
+def test_legacy_gen_ai_master_ignored_chat(agent, exporter, openai_instrumentor):  # pylint: disable=unused-argument
     import os
+    # Legacy master env must not disable instrumentation once the provider is opted in.
     os.environ["HA_GEN_AI_ENABLED"] = "false"
     from harness_sdk.config.config import Config
     Config._instance = None
@@ -337,11 +338,11 @@ def test_gen_ai_disabled_passthrough_chat(agent, exporter, openai_instrumentor):
     assert calls["n"] == 1
     spans = exporter.get_finished_spans()
     exporter.clear()
-    assert len(spans) == 0
+    assert len(spans) == 1
 
 
 @pytest.mark.asyncio
-async def test_gen_ai_disabled_passthrough_async_chat(agent, exporter, openai_instrumentor):  # pylint: disable=unused-argument
+async def test_legacy_gen_ai_master_ignored_async_chat(agent, exporter, openai_instrumentor):  # pylint: disable=unused-argument
     import os
     os.environ["HA_GEN_AI_ENABLED"] = "false"
     from harness_sdk.config.config import Config
@@ -361,10 +362,10 @@ async def test_gen_ai_disabled_passthrough_async_chat(agent, exporter, openai_in
     assert calls["n"] == 1
     spans = exporter.get_finished_spans()
     exporter.clear()
-    assert len(spans) == 0
+    assert len(spans) == 1
 
 
-def test_gen_ai_disabled_passthrough_embeddings(agent, exporter, openai_instrumentor):  # pylint: disable=unused-argument
+def test_legacy_gen_ai_master_ignored_embeddings(agent, exporter, openai_instrumentor):  # pylint: disable=unused-argument
     import os
     os.environ["HA_GEN_AI_ENABLED"] = "false"
     from harness_sdk.config.config import Config
@@ -384,11 +385,11 @@ def test_gen_ai_disabled_passthrough_embeddings(agent, exporter, openai_instrume
     assert calls["n"] == 1
     spans = exporter.get_finished_spans()
     exporter.clear()
-    assert len(spans) == 0
+    assert len(spans) == 1
 
 
 @pytest.mark.asyncio
-async def test_gen_ai_disabled_passthrough_async_embeddings(agent, exporter, openai_instrumentor):  # pylint: disable=unused-argument
+async def test_legacy_gen_ai_master_ignored_async_embeddings(agent, exporter, openai_instrumentor):  # pylint: disable=unused-argument
     import os
     os.environ["HA_GEN_AI_ENABLED"] = "false"
     from harness_sdk.config.config import Config
@@ -408,7 +409,7 @@ async def test_gen_ai_disabled_passthrough_async_embeddings(agent, exporter, ope
     assert calls["n"] == 1
     spans = exporter.get_finished_spans()
     exporter.clear()
-    assert len(spans) == 0
+    assert len(spans) == 1
 
 
 def test_completions_exception_records_error(agent, exporter, openai_instrumentor):  # pylint: disable=unused-argument

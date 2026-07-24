@@ -1,15 +1,14 @@
-"""Apply HA_* environment variables to harness-sdk configuration."""
-import os
-
+"""Apply harness-sdk environment variables to configuration."""
 from google.protobuf import wrappers_pb2
 
 from harness_sdk.config import config_pb2
+from harness_sdk.env import get_env_value
 from harness_sdk.otlp_reporting import compression_type_to_enum
 
 
 def _env(name):
-    """Prefer HA_ prefix; accept legacy AT_/TA_ for SDK settings during migration."""
-    return os.environ.get(f"HA_{name}") or os.environ.get(f"AT_{name}") or os.environ.get(f"TA_{name}")
+    """Prefer HARNESS_ prefix; accept legacy HA_/AT_/TA_ for SDK settings during migration."""
+    return get_env_value(name)
 
 
 def overwrite_with_environment(config, reporting_encoding=None):  # pylint: disable=R0912,R0914,R0915

@@ -54,7 +54,8 @@ def reset_singletons():
         del os.environ["_HANDLER"]
     keys_to_delete = [
         key for key in os.environ
-        if key.startswith("HA_") and key != "HA_ENABLE_CONSOLE_SPAN_EXPORTER"
+        if (key.startswith("HA_") or key.startswith("HARNESS_"))
+        and key != "HA_ENABLE_CONSOLE_SPAN_EXPORTER"
     ]
     for key in keys_to_delete:
         del os.environ[key]
@@ -74,10 +75,17 @@ def pytest_sessionfinish(session, exitstatus):  # pylint: disable=unused-argumen
 @pytest.fixture
 def agent():
     os.environ['HA_ENABLE_CONSOLE_SPAN_EXPORTER'] = 'true'
-    os.environ['HA_GEN_AI_ENABLED'] = 'true'
     os.environ['HA_GEN_AI_PAYLOAD_CAPTURE_ENABLED'] = 'true'
     os.environ['HA_GEN_AI_PAYLOAD_EVALUATION_ENABLED'] = 'true'
     os.environ['HA_CONTROL_PLUGINS'] = ''
+    # Instrumentation is opt-in; enable every category so shared fixtures cover
+    # both API and AI instrumentation suites.
+    os.environ['HARNESS_ENABLE_API'] = 'true'
+    os.environ['HARNESS_ENABLE_AI_OPENAI'] = 'true'
+    os.environ['HARNESS_ENABLE_AI_ANTHROPIC'] = 'true'
+    os.environ['HARNESS_ENABLE_AI_LITELLM'] = 'true'
+    os.environ['HARNESS_ENABLE_AI_GOOGLE_GENAI'] = 'true'
+    os.environ['HARNESS_ENABLE_AI_MCP'] = 'true'
 
     _uninstrument_all()
     maybe_set_genai_payload_capture_env_vars()

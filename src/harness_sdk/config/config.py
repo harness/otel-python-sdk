@@ -9,14 +9,16 @@ from google.protobuf import json_format
 from harness_sdk.config import config_pb2
 from harness_sdk.config.default import DEFAULT, SDK_CONFIG_KEYS
 from harness_sdk.config.environment import overwrite_with_environment
+from harness_sdk.env import get_env_value
 from harness_sdk.otlp_reporting import normalize_reporting_dict
 from harness_sdk.custom_logger import get_custom_logger
 
 logger = get_custom_logger(__name__)
 
 
-def _parse_plugin_env(env_key: str) -> list | None:
-    raw = os.environ.get(env_key)
+def _parse_plugin_env(target_key: str) -> list | None:
+    """Parse a comma-separated plugin list, honoring HARNESS_/HA_/AT_/TA_ precedence."""
+    raw = get_env_value(target_key)
     if not raw:
         return None
     return [name.strip() for name in raw.split(',') if name.strip()]
@@ -94,9 +96,7 @@ def build_config():
 
     plugins_config = config_dict.pop('plugins', {})
 
-    enabled_control_plugins = _parse_plugin_env('HA_CONTROL_PLUGINS')
-    if enabled_control_plugins is None:
-        enabled_control_plugins = _parse_plugin_env('AT_CONTROL_PLUGINS')
+    enabled_control_plugins = _parse_plugin_env('CONTROL_PLUGINS')
     if enabled_control_plugins is None:
         enabled_control_plugins = _ordered_plugin_names_from_section(
             plugins_config.get('control')
@@ -104,9 +104,7 @@ def build_config():
     if not enabled_control_plugins:
         enabled_control_plugins = []
 
-    enabled_observability_plugins = _parse_plugin_env('HA_OBSERVABILITY_PLUGINS')
-    if enabled_observability_plugins is None:
-        enabled_observability_plugins = _parse_plugin_env('AT_OBSERVABILITY_PLUGINS')
+    enabled_observability_plugins = _parse_plugin_env('OBSERVABILITY_PLUGINS')
     if enabled_observability_plugins is None:
         enabled_observability_plugins = _ordered_plugin_names_from_section(
             plugins_config.get('observability')
@@ -149,8 +147,4 @@ def read_from_file():
 
 
 def _config_file_path():
-    return (
-        os.environ.get('HA_CONFIG_FILE')
-        or os.environ.get('AT_CONFIG_FILE')
-        or os.environ.get('TA_CONFIG_FILE')
-    )
+    return get_env_value('CONFIG_FILE')

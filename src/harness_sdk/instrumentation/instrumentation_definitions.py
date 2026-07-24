@@ -3,6 +3,7 @@ import importlib
 from importlib import metadata as importlib_metadata
 
 from harness_sdk.custom_logger import get_custom_logger
+from harness_sdk.env import is_harness_flag_enabled
 
 FLASK_KEY = 'flask'
 DJANGO_KEY = 'django'
@@ -33,6 +34,46 @@ SUPPORTED_LIBRARIES = [
     GOOGLE_GENAI_KEY,
     MCP_KEY,
 ]
+
+# Instrumentation is strictly opt-in. Everything that is not AI (HTTP servers
+# and clients, RPC, databases, AWS) is gated behind a single API toggle.
+API_ENABLE_ENV = "HARNESS_ENABLE_API"
+
+API_LIBRARIES = frozenset({
+    FLASK_KEY, DJANGO_KEY, FAST_API_KEY,
+    GRPC_SERVER_KEY, GRPC_CLIENT_KEY,
+    POSTGRESQL_KEY, MYSQL_KEY,
+    REQUESTS_KEY, HTTPX_KEY, AIOHTTP_CLIENT_KEY,
+    BOTOCORE,
+})
+
+# Each AI provider is enabled independently via its own HARNESS_ENABLE_AI_* flag.
+AI_LIBRARY_ENV_FLAGS = {
+    OPENAI_KEY: "HARNESS_ENABLE_AI_OPENAI",
+    ANTHROPIC_KEY: "HARNESS_ENABLE_AI_ANTHROPIC",
+    LITELLM_KEY: "HARNESS_ENABLE_AI_LITELLM",
+    GOOGLE_GENAI_KEY: "HARNESS_ENABLE_AI_GOOGLE_GENAI",
+    MCP_KEY: "HARNESS_ENABLE_AI_MCP",
+}
+
+
+def is_api_instrumentation_enabled():
+    """True when the single API/HTTP instrumentation toggle is explicitly on."""
+    return is_harness_flag_enabled(API_ENABLE_ENV)
+
+
+def any_ai_provider_enabled():
+    """True when at least one AI provider is explicitly opted in."""
+    return any(is_harness_flag_enabled(flag) for flag in AI_LIBRARY_ENV_FLAGS.values())
+
+
+def is_library_enabled(library_key):
+    """Decide whether a supported library should be instrumented based on opt-in env flags."""
+    if library_key in AI_LIBRARY_ENV_FLAGS:
+        return is_harness_flag_enabled(AI_LIBRARY_ENV_FLAGS[library_key])
+    if library_key in API_LIBRARIES:
+        return is_api_instrumentation_enabled()
+    return False
 
 # map of library_key => instrumentation wrapper instance
 _INSTRUMENTATION_STATE = {}
