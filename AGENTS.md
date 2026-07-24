@@ -21,24 +21,38 @@ RUN_SDK_INTEGRATION_TESTS=1 ./scripts/run-unit-tests.sh
 
 ## Environment variable naming
 
-All SDK config uses the `HA_` prefix. `AT_` and `TA_` are legacy aliases accepted during migration.
+All SDK config uses the `HARNESS_` prefix. `HA_`, `AT_`, and `TA_` are legacy aliases accepted for backwards compatibility. When a setting is defined under multiple prefixes, precedence is `HARNESS_` > `HA_` > `AT_` > `TA_`. Resolution lives in `src/harness_sdk/env.py` (`get_env_value`, `is_env_var_present`, `is_harness_flag_enabled`).
 
 Key variables:
 | Variable | Purpose |
 |---|---|
-| `HA_SERVICE_NAME` | Service name on all spans |
-| `HA_REPORTING_ENDPOINT` | OTLP endpoint URL |
-| `HA_REPORTING_TOKEN` | Auth token (`x-harness-service-token` header) |
-| `HA_REPORTING_TRACE_REPORTER_TYPE` | `OTLP` (gRPC) or `OTLP_HTTP` |
-| `HA_REPORTING_SECURE` | `true`/`false` for TLS |
-| `HA_REPORTING_COMPRESSION` | `gzip` or empty |
-| `HA_CONTROL_PLUGINS` | Comma-separated control plugin names |
-| `HA_OBSERVABILITY_PLUGINS` | Comma-separated observability plugin names |
-| `HA_ENABLE_CONSOLE_SPAN_EXPORTER` | Set to any value to dump spans to stdout |
-| `HA_CONFIG_FILE` | Path to YAML config file (overrides env) |
-| `HA_GEN_AI_ENABLED` | Enable/disable GenAI instrumentation |
-| `HA_GEN_AI_PAYLOAD_CAPTURE_ENABLED` | Capture LLM prompt/response payloads |
-| `HA_GEN_AI_PAYLOAD_EVALUATION_ENABLED` | Run control plugins on GenAI spans |
+| `HARNESS_SERVICE_NAME` | Service name on all spans |
+| `HARNESS_REPORTING_ENDPOINT` | OTLP endpoint URL |
+| `HARNESS_REPORTING_TOKEN` | Auth token (`x-harness-service-token` header) |
+| `HARNESS_REPORTING_TRACE_REPORTER_TYPE` | `OTLP` (gRPC) or `OTLP_HTTP` |
+| `HARNESS_REPORTING_SECURE` | `true`/`false` for TLS |
+| `HARNESS_REPORTING_COMPRESSION` | `gzip` or empty |
+| `HARNESS_CONTROL_PLUGINS` | Comma-separated control plugin names |
+| `HARNESS_OBSERVABILITY_PLUGINS` | Comma-separated observability plugin names |
+| `HARNESS_ENABLE_CONSOLE_SPAN_EXPORTER` | Set to any value to dump spans to stdout |
+| `HARNESS_CONFIG_FILE` | Path to YAML config file (overrides env) |
+| `HARNESS_GEN_AI_PAYLOAD_CAPTURE_ENABLED` | Capture LLM prompt/response payloads |
+| `HARNESS_GEN_AI_PAYLOAD_EVALUATION_ENABLED` | Run control plugins on GenAI spans |
+
+### Instrumentation opt-in (strict `HARNESS_` prefix, no legacy aliases)
+
+Instrumentation is opt-in: `Agent().instrument()` instruments nothing unless a flag below is set to `true`. Categorization and gating live in `src/harness_sdk/instrumentation/instrumentation_definitions.py` (`is_library_enabled`, `is_api_instrumentation_enabled`, `any_ai_provider_enabled`), enforced in `Agent.instrument()`.
+
+| Variable | Enables |
+|---|---|
+| `HARNESS_ENABLE_API` | All non-AI instrumentation: HTTP servers/clients, gRPC, MySQL/PostgreSQL, botocore, and generic OTel contrib fallback |
+| `HARNESS_ENABLE_AI_OPENAI` | OpenAI |
+| `HARNESS_ENABLE_AI_ANTHROPIC` | Anthropic |
+| `HARNESS_ENABLE_AI_LITELLM` | LiteLLM |
+| `HARNESS_ENABLE_AI_GOOGLE_GENAI` | Google GenAI (Gemini / Vertex AI) |
+| `HARNESS_ENABLE_AI_MCP` | Model Context Protocol |
+
+The legacy `HA_GEN_AI_ENABLED` master switch no longer controls instrumentation. `skip_libraries=[...]` on `instrument()` still takes precedence over enable flags.
 
 ## Plugin system
 

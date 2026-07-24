@@ -99,9 +99,6 @@ def _mirror_entity_output(span, key: str, value: Any, current_kind: Optional[str
 def mirror_traceloop_to_gen_ai(span, key: str, value: Any, current_kind: Optional[str]) -> None:
     """Copy select Traceloop attributes to gen_ai.* / mcp.* on the same recording span."""
     gen = Config().config.gen_ai
-    if not gen.enabled.value:
-        return
-
     tool_kind = TraceloopSpanKindValues.TOOL.value
     _mirror_span_kind(span, key, value, tool_kind)
     _mirror_entity_name(span, key, value, tool_kind, current_kind)

@@ -1,6 +1,7 @@
 import io
 import json
 import logging
+import os
 import sys
 import traceback
 import zipfile
@@ -20,6 +21,8 @@ from test import setup_custom_logger
 
 def test_run():
     logger = setup_custom_logger(__name__)
+    # API/HTTP instrumentation (incl. botocore) is opt-in.
+    os.environ["HARNESS_ENABLE_API"] = "true"
     with mock_iam(), mock_lambda():
         agent = Agent()
         agent.instrument(None)

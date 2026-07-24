@@ -57,7 +57,38 @@ def test_gen_ai_env_overrides() -> None:
     Config._instance = None
 
 
+def test_harness_prefix_takes_precedence_over_legacy() -> None:
+    Config._instance = None
+    os.environ["HARNESS_SERVICE_NAME"] = "harness_service"
+    os.environ["HA_SERVICE_NAME"] = "legacy_ha_service"
+    os.environ["AT_SERVICE_NAME"] = "legacy_at_service"
+    os.environ["TA_SERVICE_NAME"] = "legacy_ta_service"
+    config = Config().config
+    assert config.service_name.value == "harness_service"
+    unset_env_variables()
+    Config._instance = None
+
+
+def test_legacy_ha_prefix_applies_when_harness_absent() -> None:
+    Config._instance = None
+    os.environ["HA_SERVICE_NAME"] = "legacy_ha_service"
+    config = Config().config
+    assert config.service_name.value == "legacy_ha_service"
+    unset_env_variables()
+    Config._instance = None
+
+
+def test_legacy_at_prefix_applies_when_ha_and_harness_absent() -> None:
+    Config._instance = None
+    os.environ["AT_SERVICE_NAME"] = "legacy_at_service"
+    config = Config().config
+    assert config.service_name.value == "legacy_at_service"
+    unset_env_variables()
+    Config._instance = None
+
+
 def unset_env_variables():
-    keys_to_delete = [key for key in os.environ if key.startswith("HA_")]
+    prefixes = ("HARNESS_", "HA_", "AT_", "TA_")
+    keys_to_delete = [key for key in os.environ if key.startswith(prefixes)]
     for key in keys_to_delete:
         del os.environ[key]

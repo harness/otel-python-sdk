@@ -384,9 +384,10 @@ def test_litellm_raw_usage_capture_disabled_by_default(agent, exporter, litellm_
     assert "gen_ai.response.usage.raw" not in attrs
 
 
-def test_litellm_gen_ai_disabled_passthrough(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
+def test_litellm_legacy_gen_ai_master_ignored(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
     import os
 
+    # Legacy master env must not disable instrumentation once opted in.
     os.environ["HA_GEN_AI_ENABLED"] = "false"
     from harness_sdk.config.config import Config
 
@@ -410,7 +411,7 @@ def test_litellm_gen_ai_disabled_passthrough(agent, exporter, litellm_instrument
     assert calls["n"] == 1
     spans = exporter.get_finished_spans()
     exporter.clear()
-    assert len(spans) == 0
+    assert len(spans) == 1
 
 
 def test_litellm_mock_response_with_wrapper_enrichment(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument

@@ -10,7 +10,7 @@ pip install -e ".[dev,anthropic,google-genai,openai,litellm]"
 ./scripts/run-unit-tests.sh
 ```
 
-Environment variables for SDK configuration use the `HA_` prefix (for example `HA_SERVICE_NAME`, `HA_REPORTING_ENDPOINT`).
+Environment variables for SDK configuration use the `HARNESS_` prefix (for example `HARNESS_SERVICE_NAME`, `HARNESS_REPORTING_ENDPOINT`). The legacy `HA_`, `AT_`, and `TA_` prefixes remain supported for backwards compatibility; when the same setting is defined under multiple prefixes, `HARNESS_` wins, then `HA_`, then `AT_`, then `TA_`.
 
 ### Integration tests (MySQL / PostgreSQL)
 
@@ -108,9 +108,41 @@ agent.instrument()
 Auto-instrumentation:
 
 ```bash
-export HA_CONFIG_FILE=/path/to/config.yaml
+export HARNESS_CONFIG_FILE=/path/to/config.yaml
 harness-instrument python app.py
 ```
+
+## Enabling instrumentation (opt-in)
+
+Instrumentation is **opt-in**. By default `agent.instrument()` and
+`harness-instrument` instrument nothing; you must explicitly enable the
+categories you want. A flag is "on" only when its value is (case-insensitively)
+`true`; any other value — or an unset variable — leaves it off.
+
+| Category | Environment variable | Enables |
+|----------|----------------------|---------|
+| API / HTTP | `HARNESS_ENABLE_API` | All non-AI instrumentation: HTTP servers (Django, Flask, FastAPI), HTTP clients (requests, HTTPX, aiohttp), gRPC, databases (MySQL, PostgreSQL), botocore, and any installed OpenTelemetry contrib instrumentors (generic fallback) |
+| AI: OpenAI | `HARNESS_ENABLE_AI_OPENAI` | OpenAI instrumentation |
+| AI: Anthropic | `HARNESS_ENABLE_AI_ANTHROPIC` | Anthropic instrumentation |
+| AI: LiteLLM | `HARNESS_ENABLE_AI_LITELLM` | LiteLLM instrumentation |
+| AI: Google GenAI | `HARNESS_ENABLE_AI_GOOGLE_GENAI` | Google GenAI (Gemini / Vertex AI) instrumentation |
+| AI: MCP | `HARNESS_ENABLE_AI_MCP` | Model Context Protocol instrumentation |
+
+Each AI provider is enabled independently. The `HARNESS_ENABLE_*` opt-in flags
+are **only** read under the `HARNESS_` prefix — they have no `HA_`/`AT_`/`TA_`
+aliases. The legacy `HA_GEN_AI_ENABLED` master switch no longer enables or
+disables AI instrumentation; use the per-provider flags instead.
+
+```bash
+# Enable HTTP/API + OpenAI only
+export HARNESS_ENABLE_API=true
+export HARNESS_ENABLE_AI_OPENAI=true
+harness-instrument python app.py
+```
+
+`agent.instrument(skip_libraries=[...])` still works and takes precedence: a
+library listed in `skip_libraries` is never instrumented even if its category
+is enabled.
 
 ## Plugins
 
