@@ -144,6 +144,30 @@ harness-instrument python app.py
 library listed in `skip_libraries` is never instrumented even if its category
 is enabled.
 
+### Enrich the current span
+
+Add runtime attributes while the target instrumented span is active:
+
+```python
+from harness_sdk import set_span_attribute, set_span_attributes
+
+set_span_attribute("request.client.name", client_name)
+set_span_attributes({
+    "agent.action.type": action_type,
+    "custom.retry.count": retry_count,
+})
+```
+
+These helpers update only the current recording span. They silently do nothing when no
+recording span is active. Attributes do not propagate to child spans or downstream
+services.
+
+Keys may use any customer-defined name. Values must be valid OpenTelemetry attribute
+values: strings, booleans, integers, floats, or homogeneous sequences of those types.
+For duplicate keys, the last write wins; instrumentation can overwrite a customer value
+if it writes the same key later. Because the span already exists, these attributes
+cannot influence head sampling.
+
 ## Plugins
 
 The SDK loads extensions via [setuptools entry points](https://setuptools.pypa.io/en/latest/userguide/entry_point.html). Each plugin has a **name** (the entry-point key). Names are listed in config or environment variables; only installed plugins are loaded, in the order you configure.
