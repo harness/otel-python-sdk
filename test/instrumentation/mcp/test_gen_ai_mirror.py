@@ -89,6 +89,15 @@ def test_apply_gen_ai_env_respects_existing_env(mock_gen_ai_config):
         assert os.environ.get("TRACELOOP_TRACE_CONTENT") == "true"
 
 
+def test_apply_gen_ai_env_disable_overwrites_preexisting_true(mock_gen_ai_config):
+    """Disable is a privacy control: it must overwrite an env var the deployment
+    already set to true, unlike the enable path which only supplies a default."""
+    mock_gen_ai_config.payload_capture_enabled.value = False
+    with patch.dict(os.environ, {"TRACELOOP_TRACE_CONTENT": "true"}):
+        apply_gen_ai_env_for_mcp()
+        assert os.environ.get("TRACELOOP_TRACE_CONTENT") == "false"
+
+
 def test_mirror_entity_name_skipped_when_not_tool_kind(mock_gen_ai_config):
     span = MagicMock()
     mirror_traceloop_to_gen_ai(

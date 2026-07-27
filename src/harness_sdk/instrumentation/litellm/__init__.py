@@ -224,6 +224,10 @@ def _set_pre_call_request_attributes(
 
     if pre_call.payload is None:
         return
+    # Harness config is authoritative in the disable direction: even if LiteLLM's
+    # own message_logging flag is on, a config-disabled capture must win.
+    if not Config().config.gen_ai.payload_capture_enabled.value:
+        return
     try:
         import litellm  # pylint: disable=import-outside-toplevel
         from litellm.litellm_core_utils.safe_json_dumps import (  # pylint: disable=import-outside-toplevel

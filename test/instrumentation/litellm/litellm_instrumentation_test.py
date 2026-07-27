@@ -96,6 +96,43 @@ def test_litellm_completion_span_has_gen_ai_attributes(agent, exporter, litellm_
     assert attrs.get("gen_ai.usage.reasoning.output_tokens") == 1
 
 
+def test_litellm_input_messages_captured_when_enabled(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
+    with patch("litellm.main.completion", new=_fake_model_response):
+        litellm_instrumentor.instrument()
+        litellm.completion(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+    spans = exporter.get_finished_spans()
+    exporter.clear()
+    attrs = _request_span(spans).attributes
+    assert "gen_ai.input.messages" in attrs
+    assert "hi" in attrs.get("gen_ai.input.messages")
+
+
+def test_litellm_input_messages_omitted_when_capture_disabled(agent, exporter, litellm_instrumentor, monkeypatch):  # pylint: disable=unused-argument
+    monkeypatch.setenv("HA_GEN_AI_PAYLOAD_CAPTURE_ENABLED", "false")
+    from harness_sdk.config.config import Config  # pylint: disable=import-outside-toplevel
+
+    Config._instance = None
+
+    with patch("litellm.main.completion", new=_fake_model_response):
+        litellm_instrumentor.instrument()
+        litellm.completion(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+    spans = exporter.get_finished_spans()
+    exporter.clear()
+    attrs = _request_span(spans).attributes
+    assert "gen_ai.input.messages" not in attrs
+    # Non-payload request attributes are still recorded.
+    assert attrs.get("gen_ai.request.model") == "gpt-4o-mini"
+    assert attrs.get("gen_ai.operation.name") == "chat"
+
+
 def test_litellm_evaluate_blocks_before_wrapped(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
     calls = {"n": 0}
 

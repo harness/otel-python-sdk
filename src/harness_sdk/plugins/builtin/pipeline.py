@@ -9,6 +9,7 @@ from harness_sdk.agent_init import AgentInit
 from harness_sdk.custom_logger import get_custom_logger
 from harness_sdk.excluded_by_attribute_span_processor import ExcludeByAttributeSpanProcessor
 from harness_sdk.db_control_span_processor import DbControlSpanProcessor
+from harness_sdk.gen_ai_payload_scrub_span_processor import GenAiPayloadScrubSpanProcessor
 
 logger = get_custom_logger(__name__)
 
@@ -46,7 +47,10 @@ class BuiltinPipelinePlugin:
             excluded_value="nospan",
         )
         db_control_processor = DbControlSpanProcessor(filter_processor)
-        return [db_control_processor]
+        # Outermost: scrub GenAI payload attributes before any other on_end
+        # logic (control evaluation, filtering, batching) sees the span.
+        scrub_processor = GenAiPayloadScrubSpanProcessor(db_control_processor)
+        return [scrub_processor]
 
     def shutdown(self) -> None:
         pass
