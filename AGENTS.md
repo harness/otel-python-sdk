@@ -88,13 +88,20 @@ Register via `pyproject.toml` entry points, then list the name in `HA_OBSERVABIL
 ## Span processor pipeline (default)
 
 ```
-SamplingSpanProcessor (DbControlSpanProcessor)
-  └─ ExcludeByAttributeSpanProcessor   (drops traceableai.span_type=nospan)
-       └─ BatchSpanProcessor
-            └─ OTLPSpanExporter
+GenAiPayloadScrubSpanProcessor   (strips GenAI payload attrs when capture disabled)
+  └─ SamplingSpanProcessor (DbControlSpanProcessor)
+       └─ ExcludeByAttributeSpanProcessor   (drops traceableai.span_type=nospan)
+            └─ BatchSpanProcessor
+                 └─ OTLPSpanExporter
 ```
 
 `DbControlSpanProcessor` — filters MySQL/PostgreSQL spans through control plugins.
+
+`GenAiPayloadScrubSpanProcessor` — defense-in-depth: when `gen_ai.payload_capture_enabled` resolves to `false`, strips `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instruction`, `gen_ai.prompt*`, `gen_ai.completion*`, `traceloop.entity.input`, and `traceloop.entity.output` from every span before export, regardless of which instrumentation set them. Cheap no-op when capture is enabled.
+
+### GenAI payload capture is a privacy control (disable always wins)
+
+`HARNESS_GEN_AI_PAYLOAD_CAPTURE_ENABLED=false` (or YAML `gen_ai.payload_capture_enabled: false`) must guarantee no prompt/response content is captured, even if the deployment environment already set OTel/Traceloop env vars (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`, `OTEL_SEMCONV_STABILITY_OPT_IN`, `TRACELOOP_TRACE_CONTENT`) before the SDK initializes. Whenever the resolved config value is `false` (explicit or default), the SDK forces those env vars off and patches the cached OTel semconv-stability state, overwriting whatever was already there. When capture is enabled, the SDK only supplies defaults: an env var the user already set is left untouched. The `GenAiPayloadScrubSpanProcessor` above is the final backstop for instrumentation paths that don't consult config directly.
 
 ## Build / vendor
 

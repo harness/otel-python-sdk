@@ -25,13 +25,19 @@ def apply_gen_ai_env_for_mcp() -> None:
 
     The MCP contrib package gates body capture on TRACELOOP_TRACE_CONTENT; we
     mirror TA_GEN_AI_* via Config (see environment.default / TA_GEN_AI_*).
+
+    Disable is forced unconditionally, overwriting any pre-existing
+    TRACELOOP_TRACE_CONTENT (this is a privacy control: config-disabled must
+    always win over a deployment-provided env var). Enable only supplies a
+    default and leaves an existing env var untouched.
     """
     gen = Config().config.gen_ai
+    if not gen.payload_capture_enabled.value:
+        os.environ["TRACELOOP_TRACE_CONTENT"] = "false"
+        return
     if "TRACELOOP_TRACE_CONTENT" in os.environ:
         return
-    os.environ["TRACELOOP_TRACE_CONTENT"] = (
-        "true" if gen.payload_capture_enabled.value else "false"
-    )
+    os.environ["TRACELOOP_TRACE_CONTENT"] = "true"
 
 
 def _mirror_span_kind(span, key: str, value: Any, tool_kind: str) -> None:
