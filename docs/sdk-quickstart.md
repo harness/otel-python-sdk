@@ -12,18 +12,17 @@ exports OTLP/HTTP spans to ingest.
 
 ## 1. Install
 
-The SDK is published on PyPI as `harness-sdk`. Pin the published release in
-applications and CI builds:
+The SDK is published on PyPI as `harness-sdk`. Install the current release:
 
 ```bash
-pip install "harness-sdk==1.0.1"
+pip install harness-sdk
 ```
 
 Add the extra for the LLM client you use:
 
 ```bash
-pip install "harness-sdk[litellm]==1.0.1"     # for LiteLLM
-pip install "harness-sdk[anthropic]==1.0.1"   # for the Anthropic client
+pip install "harness-sdk[litellm]"     # for LiteLLM
+pip install "harness-sdk[anthropic]"   # for the Anthropic client
 ```
 
 > Anthropic in-process spans additionally require the OTel GenAI helpers, which

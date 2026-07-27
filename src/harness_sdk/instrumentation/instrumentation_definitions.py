@@ -145,6 +145,23 @@ _GENERIC_CONTRIB_DENYLIST = {
     "aiobotocore",
 }
 
+# AI instrumentation must be enabled through a provider-specific opt-in flag,
+# never through the generic contrib fallback behind HARNESS_ENABLE_API.
+_GENERIC_AI_CONTRIB_DENYLIST = {
+    "bedrock",
+    "cohere",
+    "groq",
+    "langchain",
+    "llamaindex",
+    "mistralai",
+    "ollama",
+    "replicate",
+    "together",
+    "transformers",
+    "vertexai",
+    "watsonx",
+}
+
 
 def _normalize_library_name(library_name):
     return ''.join(ch for ch in str(library_name).lower() if ch.isalnum())
@@ -194,7 +211,7 @@ def instrument_supported_contrib_without_wrapper(skip_libraries=None):
 
     normalized_skip_libraries = _get_normalized_skip_libraries(skip_libraries)
     normalized_wrapper_library_names = _get_wrapper_normalized_names()
-    normalized_denylist = set(_GENERIC_CONTRIB_DENYLIST)
+    normalized_denylist = _GENERIC_CONTRIB_DENYLIST | _GENERIC_AI_CONTRIB_DENYLIST
 
     for entry_point in _get_contrib_instrumentation_entry_points():
         normalized_entry_name = _normalize_library_name(entry_point.name)
