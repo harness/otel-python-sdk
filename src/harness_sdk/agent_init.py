@@ -17,6 +17,7 @@ from opentelemetry.trace import ProxyTracerProvider
 from opentelemetry.sdk.resources import Resource
 from harness_sdk import constants
 from harness_sdk.config import config_pb2
+from harness_sdk.env import is_env_var_present
 from harness_sdk.otlp_reporting import (
     compression_type_to_otlp_grpc,
     compression_type_to_otlp_http,
@@ -42,11 +43,7 @@ class AgentInit:  # pylint: disable=R0902,R0903
             self._config = agent_config
         self.init_trace_provider()
         self.init_propagation()
-        if (
-            "HA_ENABLE_CONSOLE_SPAN_EXPORTER" in os.environ
-            or "AT_ENABLE_CONSOLE_SPAN_EXPORTER" in os.environ
-            or "TA_ENABLE_CONSOLE_SPAN_EXPORTER" in os.environ
-        ):
+        if is_env_var_present("ENABLE_CONSOLE_SPAN_EXPORTER"):
             self.set_console_span_processor()
 
     def init_trace_provider(self) -> None:

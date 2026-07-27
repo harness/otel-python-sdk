@@ -33,6 +33,24 @@ def test_load_sdk_gen_ai_from_file():
     reset()
 
 
+def test_load_enabled_ai_frameworks_from_file(tmp_path):
+    prepare()
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "gen_ai:\n"
+        "  enabled_frameworks:\n"
+        "    - openai\n"
+        "    - anthropic\n",
+        encoding="utf-8",
+    )
+    os.environ["HA_CONFIG_FILE"] = str(config_file)
+
+    config = Config()
+
+    assert config.enabled_ai_frameworks == ["openai", "anthropic"]
+    reset()
+
+
 def test_sdk_default_config():
     prepare()
     traceable_config = Config().config
@@ -45,7 +63,8 @@ def test_sdk_default_config():
     assert Config().reporting_encoding == 'proto'
 
     gen_ai = traceable_config.gen_ai
-    assert gen_ai.enabled.value is True
+    assert Config().enabled_ai_frameworks == []
+    assert gen_ai.enabled.value is False
     assert gen_ai.payload_capture_enabled.value is True
     assert gen_ai.payload_evaluation_enabled.value is True
 

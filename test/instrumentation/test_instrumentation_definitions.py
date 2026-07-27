@@ -159,6 +159,18 @@ def test_instrument_skips_denylisted_libraries():
     assert "aws-lambda" not in _GENERIC_INSTRUMENTATION_STATE
     assert "aiobotocore" not in _GENERIC_INSTRUMENTATION_STATE
 
+
+def test_instrument_skips_ai_focused_generic_instrumentors():
+    langchain_ep = _make_entry_point("langchain")
+
+    with patch("harness_sdk.instrumentation.instrumentation_definitions._get_contrib_instrumentation_entry_points",
+               return_value=[langchain_ep]):
+        instrument_supported_contrib_without_wrapper()
+
+    langchain_ep.load.assert_not_called()
+    assert "langchain" not in _GENERIC_INSTRUMENTATION_STATE
+
+
 def test_instrument_skips_skip_libraries():
     ep = _make_entry_point("redis")
 

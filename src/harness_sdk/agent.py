@@ -17,6 +17,9 @@ from harness_sdk.instrumentation.instrumentation_definitions import (
     DJANGO_KEY,
     FAST_API_KEY,
     instrument_supported_contrib_without_wrapper,
+    is_library_enabled,
+    is_api_instrumentation_enabled,
+    any_ai_provider_enabled,
 )
 from harness_sdk.instrumentation.genai_env import maybe_set_genai_payload_capture_env_vars
 from harness_sdk.plugins.control import ControlPlugin, get_control_registry
@@ -85,16 +88,24 @@ class Agent:
             logger.debug('agent is not initialized, not instrumenting')
             return
 
-        maybe_set_genai_payload_capture_env_vars()
+        enabled_ai_frameworks = self._config.enabled_ai_frameworks
+        if (
+            not self._config.config.gen_ai.payload_capture_enabled.value
+            or any_ai_provider_enabled(enabled_ai_frameworks)
+        ):
+            maybe_set_genai_payload_capture_env_vars()
 
         for library_key in SUPPORTED_LIBRARIES:
             if library_key in skip_libraries:
                 logger.debug('not attempting to instrument %s', library_key)
                 continue
+            if not is_library_enabled(library_key, enabled_ai_frameworks):
+                logger.debug('%s not enabled via config or opt-in env flag, skipping', library_key)
+                continue
             logger.debug("attempting to instrument %s", library_key)
             self._instrument(library_key, app, auto_instrument)
 
-        if self._should_instrument_generic_contrib():
+        if is_api_instrumentation_enabled() and self._should_instrument_generic_contrib():
             instrument_supported_contrib_without_wrapper(skip_libraries)
         else:
             logger.debug("Skipping generic contrib fallback instrumentation")

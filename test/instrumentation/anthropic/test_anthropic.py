@@ -481,7 +481,7 @@ def test_double_instrument_does_not_double_wrap(agent, exporter, anthropic_instr
 
 # ── gen_ai disabled passthrough ─────────────────────────────────────────────
 
-def test_gen_ai_disabled_passthrough(agent, exporter, anthropic_instrumentor):
+def test_legacy_gen_ai_master_ignored(agent, exporter, anthropic_instrumentor):
     call_count = {"n": 0}
 
     def counting_fake(_self, *_a, **_k):
@@ -489,6 +489,7 @@ def test_gen_ai_disabled_passthrough(agent, exporter, anthropic_instrumentor):
         return _FakeMessage()
 
     with patch.object(Messages, "create", new=counting_fake):
+        # Legacy master env must not disable instrumentation once opted in.
         os.environ["HA_GEN_AI_ENABLED"] = "false"
         from harness_sdk.config.config import Config
         Config._instance = None  # force re-read of env
@@ -503,7 +504,7 @@ def test_gen_ai_disabled_passthrough(agent, exporter, anthropic_instrumentor):
 
     spans = exporter.get_finished_spans()
     exporter.clear()
-    assert len(spans) == 0
+    assert len(spans) == 1
     assert call_count["n"] == 1  # reached the real (fake) implementation
 
 

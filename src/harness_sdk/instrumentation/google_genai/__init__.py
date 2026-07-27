@@ -312,8 +312,6 @@ def _make_generate_sync(handler: TelemetryHandler) -> Callable[..., Any]:
     capture_content = should_capture_content_on_spans_in_experimental_mode()
 
     def _wrapper(wrapped, instance, args, kwargs):
-        if not Config().config.gen_ai.enabled.value:
-            return wrapped(*args, **kwargs)
         invocation = _build_invocation(
             handler, _resolve_provider(instance),
             _extract_model(args, kwargs), _extract_contents(args, kwargs),
@@ -342,8 +340,6 @@ def _make_generate_async(handler: TelemetryHandler) -> Callable[..., Any]:
     capture_content = should_capture_content_on_spans_in_experimental_mode()
 
     async def _wrapper(wrapped, instance, args, kwargs):
-        if not Config().config.gen_ai.enabled.value:
-            return await wrapped(*args, **kwargs)
         invocation = _build_invocation(
             handler, _resolve_provider(instance),
             _extract_model(args, kwargs), _extract_contents(args, kwargs),
@@ -417,8 +413,6 @@ def _make_generate_stream_sync(handler: TelemetryHandler) -> Callable[..., Any]:
     capture_content = should_capture_content_on_spans_in_experimental_mode()
 
     def _wrapper(wrapped, instance, args, kwargs):
-        if not Config().config.gen_ai.enabled.value:
-            return wrapped(*args, **kwargs)
         invocation = _build_invocation(
             handler, _resolve_provider(instance),
             _extract_model(args, kwargs), _extract_contents(args, kwargs),
@@ -443,8 +437,6 @@ def _make_generate_stream_async(handler: TelemetryHandler) -> Callable[..., Any]
     capture_content = should_capture_content_on_spans_in_experimental_mode()
 
     async def _wrapper(wrapped, instance, args, kwargs):
-        if not Config().config.gen_ai.enabled.value:
-            return await wrapped(*args, **kwargs)
         invocation = _build_invocation(
             handler, _resolve_provider(instance),
             _extract_model(args, kwargs), _extract_contents(args, kwargs),
@@ -483,8 +475,6 @@ def _apply_embedding_response(invocation: Any, result: Any) -> None:
 
 def _make_embed_sync(handler: TelemetryHandler) -> Callable[..., Any]:
     def _wrapper(wrapped, instance, args, kwargs):
-        if not Config().config.gen_ai.enabled.value:
-            return wrapped(*args, **kwargs)
         invocation = handler.start_embedding(
             _resolve_provider(instance),
             request_model=_extract_model(args, kwargs),
@@ -510,8 +500,6 @@ def _make_embed_sync(handler: TelemetryHandler) -> Callable[..., Any]:
 
 def _make_embed_async(handler: TelemetryHandler) -> Callable[..., Any]:
     async def _wrapper(wrapped, instance, args, kwargs):
-        if not Config().config.gen_ai.enabled.value:
-            return await wrapped(*args, **kwargs)
         invocation = handler.start_embedding(
             _resolve_provider(instance),
             request_model=_extract_model(args, kwargs),
@@ -559,9 +547,6 @@ class GoogleGenAIInstrumentorWrapper(BaseInstrumentorWrapper):
     def instrument(self, **_kwargs: Any) -> None:
         if self._applied:
             logger.debug("google-genai instrumentation already applied.")
-            return
-        if not Config().config.gen_ai.enabled.value:
-            logger.debug("Gen AI instrumentation disabled; skip google-genai wraps.")
             return
         try:
             handler = _get_handler()

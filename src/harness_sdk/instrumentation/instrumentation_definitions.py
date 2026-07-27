@@ -1,8 +1,10 @@
 '''this module acts as a driver for instrumentation definitions + application'''
 import importlib
+import os
 from importlib import metadata as importlib_metadata
 
 from harness_sdk.custom_logger import get_custom_logger
+from harness_sdk.env import is_harness_flag_enabled
 
 FLASK_KEY = 'flask'
 DJANGO_KEY = 'django'
@@ -33,6 +35,56 @@ SUPPORTED_LIBRARIES = [
     GOOGLE_GENAI_KEY,
     MCP_KEY,
 ]
+
+# Instrumentation is strictly opt-in. Everything that is not AI (HTTP servers
+# and clients, RPC, databases, AWS) is gated behind a single API toggle.
+API_ENABLE_ENV = "HARNESS_ENABLE_API"
+
+API_LIBRARIES = frozenset({
+    FLASK_KEY, DJANGO_KEY, FAST_API_KEY,
+    GRPC_SERVER_KEY, GRPC_CLIENT_KEY,
+    POSTGRESQL_KEY, MYSQL_KEY,
+    REQUESTS_KEY, HTTPX_KEY, AIOHTTP_CLIENT_KEY,
+    BOTOCORE,
+})
+
+# Each AI provider is enabled independently via its own HARNESS_ENABLE_AI_* flag.
+AI_LIBRARY_ENV_FLAGS = {
+    OPENAI_KEY: "HARNESS_ENABLE_AI_OPENAI",
+    ANTHROPIC_KEY: "HARNESS_ENABLE_AI_ANTHROPIC",
+    LITELLM_KEY: "HARNESS_ENABLE_AI_LITELLM",
+    GOOGLE_GENAI_KEY: "HARNESS_ENABLE_AI_GOOGLE_GENAI",
+    MCP_KEY: "HARNESS_ENABLE_AI_MCP",
+}
+
+
+def is_api_instrumentation_enabled():
+    """True when the single API/HTTP instrumentation toggle is explicitly on."""
+    return is_harness_flag_enabled(API_ENABLE_ENV)
+
+
+def any_ai_provider_enabled(enabled_ai_frameworks=None):
+    """True when at least one AI provider is explicitly opted in."""
+    return any(
+        is_library_enabled(library_key, enabled_ai_frameworks)
+        for library_key in AI_LIBRARY_ENV_FLAGS
+    )
+
+
+def is_library_enabled(library_key, enabled_ai_frameworks=None):
+    """Decide whether a supported library should be instrumented based on opt-in env flags."""
+    if library_key in AI_LIBRARY_ENV_FLAGS:
+        env_flag = AI_LIBRARY_ENV_FLAGS[library_key]
+        if env_flag in os.environ:
+            return is_harness_flag_enabled(env_flag)
+        configured_frameworks = {
+            _normalize_library_name(name)
+            for name in (enabled_ai_frameworks or [])
+        }
+        return _normalize_library_name(library_key) in configured_frameworks
+    if library_key in API_LIBRARIES:
+        return is_api_instrumentation_enabled()
+    return False
 
 # map of library_key => instrumentation wrapper instance
 _INSTRUMENTATION_STATE = {}
@@ -104,6 +156,23 @@ _GENERIC_CONTRIB_DENYLIST = {
     "aiobotocore",
 }
 
+# AI instrumentation must be enabled through a provider-specific opt-in flag,
+# never through the generic contrib fallback behind HARNESS_ENABLE_API.
+_GENERIC_AI_CONTRIB_DENYLIST = {
+    "bedrock",
+    "cohere",
+    "groq",
+    "langchain",
+    "llamaindex",
+    "mistralai",
+    "ollama",
+    "replicate",
+    "together",
+    "transformers",
+    "vertexai",
+    "watsonx",
+}
+
 
 def _normalize_library_name(library_name):
     return ''.join(ch for ch in str(library_name).lower() if ch.isalnum())
@@ -153,7 +222,7 @@ def instrument_supported_contrib_without_wrapper(skip_libraries=None):
 
     normalized_skip_libraries = _get_normalized_skip_libraries(skip_libraries)
     normalized_wrapper_library_names = _get_wrapper_normalized_names()
-    normalized_denylist = set(_GENERIC_CONTRIB_DENYLIST)
+    normalized_denylist = _GENERIC_CONTRIB_DENYLIST | _GENERIC_AI_CONTRIB_DENYLIST
 
     for entry_point in _get_contrib_instrumentation_entry_points():
         normalized_entry_name = _normalize_library_name(entry_point.name)
