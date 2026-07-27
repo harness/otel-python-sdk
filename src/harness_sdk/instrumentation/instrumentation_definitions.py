@@ -1,5 +1,6 @@
 '''this module acts as a driver for instrumentation definitions + application'''
 import importlib
+import os
 from importlib import metadata as importlib_metadata
 
 from harness_sdk.custom_logger import get_custom_logger
@@ -62,15 +63,25 @@ def is_api_instrumentation_enabled():
     return is_harness_flag_enabled(API_ENABLE_ENV)
 
 
-def any_ai_provider_enabled():
+def any_ai_provider_enabled(enabled_ai_frameworks=None):
     """True when at least one AI provider is explicitly opted in."""
-    return any(is_harness_flag_enabled(flag) for flag in AI_LIBRARY_ENV_FLAGS.values())
+    return any(
+        is_library_enabled(library_key, enabled_ai_frameworks)
+        for library_key in AI_LIBRARY_ENV_FLAGS
+    )
 
 
-def is_library_enabled(library_key):
+def is_library_enabled(library_key, enabled_ai_frameworks=None):
     """Decide whether a supported library should be instrumented based on opt-in env flags."""
     if library_key in AI_LIBRARY_ENV_FLAGS:
-        return is_harness_flag_enabled(AI_LIBRARY_ENV_FLAGS[library_key])
+        env_flag = AI_LIBRARY_ENV_FLAGS[library_key]
+        if env_flag in os.environ:
+            return is_harness_flag_enabled(env_flag)
+        configured_frameworks = {
+            _normalize_library_name(name)
+            for name in (enabled_ai_frameworks or [])
+        }
+        return _normalize_library_name(library_key) in configured_frameworks
     if library_key in API_LIBRARIES:
         return is_api_instrumentation_enabled()
     return False

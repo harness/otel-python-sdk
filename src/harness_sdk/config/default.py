@@ -42,7 +42,7 @@ DEFAULT = {
         'deployment_name': '',
     },
     'gen_ai': {
-        'enabled': True,
+        'enabled_frameworks': [],
         'payload_capture_enabled': True,
         'payload_evaluation_enabled': True,
     },

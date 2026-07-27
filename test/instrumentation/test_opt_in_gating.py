@@ -50,6 +50,25 @@ def test_ai_provider_enabled_independently(provider_key, flag):
         assert is_library_enabled(key) is False
 
 
+def test_config_enables_ai_provider_when_env_is_unset():
+    assert is_library_enabled(OPENAI_KEY, ["openai"]) is True
+    assert any_ai_provider_enabled(["openai"]) is True
+
+
+def test_explicit_ai_env_false_overrides_config():
+    os.environ["HARNESS_ENABLE_AI_OPENAI"] = "false"
+
+    assert is_library_enabled(OPENAI_KEY, ["openai"]) is False
+    assert any_ai_provider_enabled(["openai"]) is False
+
+
+def test_explicit_ai_env_true_overrides_config():
+    os.environ["HARNESS_ENABLE_AI_OPENAI"] = "true"
+
+    assert is_library_enabled(OPENAI_KEY, []) is True
+    assert any_ai_provider_enabled([]) is True
+
+
 def test_flag_requires_exact_true_value():
     os.environ["HARNESS_ENABLE_API"] = "1"
     assert is_api_instrumentation_enabled() is False
@@ -130,6 +149,20 @@ def test_instrument_single_ai_provider_only(monkeypatch):
     assert instrumented == [OPENAI_KEY]
     # API-only generic contrib must stay off when only an AI provider is enabled.
     assert contrib_calls == []
+
+
+def test_instrument_uses_configured_ai_frameworks(monkeypatch):
+    ag = _build_agent()
+    ag._config.enabled_ai_frameworks = ["openai"]
+    instrumented = _record_instrumented(monkeypatch)
+    monkeypatch.setattr(
+        "harness_sdk.agent.instrument_supported_contrib_without_wrapper",
+        lambda skip_libraries=None: None,
+    )
+
+    ag.instrument()
+
+    assert instrumented == [OPENAI_KEY]
 
 
 def test_instrument_api_flag_enables_api_and_generic_contrib(monkeypatch):

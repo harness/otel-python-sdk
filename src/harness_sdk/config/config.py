@@ -68,6 +68,7 @@ class Config:  # pylint:disable=R0903
                 self.plugins_config,
                 self.enabled_control_plugins,
                 self.enabled_observability_plugins,
+                self.enabled_ai_frameworks,
                 self.reporting_encoding,
             ) = build_config()
 
@@ -95,6 +96,15 @@ def build_config():
         merge_config(config_dict, _filter_sdk_config(file_dict))
 
     plugins_config = config_dict.pop('plugins', {})
+    gen_ai_config = config_dict.get('gen_ai', {})
+    enabled_ai_frameworks = gen_ai_config.pop('enabled_frameworks', [])
+    if not isinstance(enabled_ai_frameworks, list):
+        enabled_ai_frameworks = []
+    enabled_ai_frameworks = [
+        str(name).strip()
+        for name in enabled_ai_frameworks
+        if str(name).strip()
+    ]
 
     enabled_control_plugins = _parse_plugin_env('CONTROL_PLUGINS')
     if enabled_control_plugins is None:
@@ -128,6 +138,7 @@ def build_config():
         plugins_config,
         enabled_control_plugins,
         enabled_observability_plugins,
+        enabled_ai_frameworks,
         reporting_encoding,
     )
 
