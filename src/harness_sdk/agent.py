@@ -89,7 +89,10 @@ class Agent:
             return
 
         enabled_ai_frameworks = self._config.enabled_ai_frameworks
-        if any_ai_provider_enabled(enabled_ai_frameworks):
+        if (
+            not self._config.config.gen_ai.payload_capture_enabled.value
+            or any_ai_provider_enabled(enabled_ai_frameworks)
+        ):
             maybe_set_genai_payload_capture_env_vars()
 
         for library_key in SUPPORTED_LIBRARIES:

@@ -136,6 +136,20 @@ def test_instrument_default_off_instruments_nothing(monkeypatch):
     assert contrib_calls == []
 
 
+def test_payload_disable_applied_without_ai_provider(monkeypatch):
+    os.environ["HARNESS_GEN_AI_PAYLOAD_CAPTURE_ENABLED"] = "false"
+    ag = _build_agent()
+    apply_calls = []
+    monkeypatch.setattr(
+        "harness_sdk.agent.maybe_set_genai_payload_capture_env_vars",
+        lambda: apply_calls.append(True),
+    )
+
+    ag.instrument()
+
+    assert apply_calls == [True]
+
+
 def test_instrument_single_ai_provider_only(monkeypatch):
     os.environ["HARNESS_ENABLE_AI_OPENAI"] = "true"
     ag = _build_agent()
