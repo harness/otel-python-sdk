@@ -145,7 +145,7 @@ Agent().instrument(skip_libraries=["requests"])
 
 | Variable | Effect |
 |---|---|
-| `HARNESS_GEN_AI_PAYLOAD_CAPTURE_ENABLED` | `false` to omit prompt/response bodies from spans |
+| `HARNESS_GEN_AI_PAYLOAD_CAPTURE_ENABLED` | `true` to capture prompt/response bodies in spans (default: off) |
 | `HARNESS_SPAN_ATTRIBUTES` | extra attributes on every span, e.g. `env=prod,team=ai` |
 | `HARNESS_OBSERVABILITY_PLUGINS` | `builtin_span_attributes` to keep instrumentation but disable the SDK's own OTLP exporter (if you already export spans yourself) |
 | `HARNESS_ENABLED` | `false` to disable the SDK entirely (no code change) |

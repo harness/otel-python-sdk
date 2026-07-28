@@ -36,7 +36,7 @@ Key variables:
 | `HARNESS_OBSERVABILITY_PLUGINS` | Comma-separated observability plugin names |
 | `HARNESS_ENABLE_CONSOLE_SPAN_EXPORTER` | Set to any value to dump spans to stdout |
 | `HARNESS_CONFIG_FILE` | Path to YAML config file (overrides env) |
-| `HARNESS_GEN_AI_PAYLOAD_CAPTURE_ENABLED` | Capture LLM prompt/response payloads |
+| `HARNESS_GEN_AI_PAYLOAD_CAPTURE_ENABLED` | Capture LLM prompt/response payloads (default: off) |
 | `HARNESS_GEN_AI_PAYLOAD_EVALUATION_ENABLED` | Run control plugins on GenAI spans |
 
 ### Instrumentation opt-in (strict `HARNESS_` prefix, no legacy aliases)
