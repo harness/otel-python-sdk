@@ -82,8 +82,19 @@ def test_flag_requires_exact_true_value():
     assert is_api_instrumentation_enabled() is True
 
 
-def test_ai_flags_have_no_legacy_aliases():
+def test_ai_flags_accept_ha_alias():
     os.environ["HA_ENABLE_AI_OPENAI"] = "true"
+    assert is_library_enabled(OPENAI_KEY) is True
+    assert any_ai_provider_enabled() is True
+
+
+def test_ai_flag_harness_prefix_wins_over_ha():
+    os.environ["HARNESS_ENABLE_AI_OPENAI"] = "false"
+    os.environ["HA_ENABLE_AI_OPENAI"] = "true"
+    assert is_library_enabled(OPENAI_KEY) is False
+
+
+def test_ai_flags_have_no_at_ta_aliases():
     os.environ["AT_ENABLE_AI_OPENAI"] = "true"
     os.environ["TA_ENABLE_AI_OPENAI"] = "true"
     try:
@@ -93,13 +104,19 @@ def test_ai_flags_have_no_legacy_aliases():
             os.environ.pop(legacy, None)
 
 
-def test_api_flag_has_no_legacy_aliases():
+def test_api_flag_accepts_ha_alias():
     os.environ["HA_ENABLE_API"] = "true"
+    assert is_api_instrumentation_enabled() is True
+
+
+def test_api_flag_has_no_at_ta_aliases():
     os.environ["AT_ENABLE_API"] = "true"
+    os.environ["TA_ENABLE_API"] = "true"
     try:
         assert is_api_instrumentation_enabled() is False
     finally:
-        os.environ.pop("AT_ENABLE_API", None)
+        for legacy in ("AT_ENABLE_API", "TA_ENABLE_API"):
+            os.environ.pop(legacy, None)
 
 
 # --------------------------------------------------------------------------- #

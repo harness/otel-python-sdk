@@ -65,7 +65,7 @@ def test_sdk_default_config():
     gen_ai = traceable_config.gen_ai
     assert Config().enabled_ai_frameworks == []
     assert gen_ai.enabled.value is False
-    assert gen_ai.payload_capture_enabled.value is True
+    assert gen_ai.payload_capture_enabled.value is False
     assert gen_ai.payload_evaluation_enabled.value is True
 
     assert len(traceable_config.span_attributes) == 0

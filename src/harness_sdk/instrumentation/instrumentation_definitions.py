@@ -4,7 +4,7 @@ import os
 from importlib import metadata as importlib_metadata
 
 from harness_sdk.custom_logger import get_custom_logger
-from harness_sdk.env import is_harness_flag_enabled
+from harness_sdk.env import is_enable_flag_present, is_harness_flag_enabled
 
 FLASK_KEY = 'flask'
 DJANGO_KEY = 'django'
@@ -75,7 +75,7 @@ def is_library_enabled(library_key, enabled_ai_frameworks=None):
     """Decide whether a supported library should be instrumented based on opt-in env flags."""
     if library_key in AI_LIBRARY_ENV_FLAGS:
         env_flag = AI_LIBRARY_ENV_FLAGS[library_key]
-        if env_flag in os.environ:
+        if is_enable_flag_present(env_flag):
             return is_harness_flag_enabled(env_flag)
         configured_frameworks = {
             _normalize_library_name(name)

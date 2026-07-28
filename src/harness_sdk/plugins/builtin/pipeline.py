@@ -6,7 +6,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 from harness_sdk.agent_init import AgentInit
 from harness_sdk.custom_logger import get_custom_logger
-from harness_sdk.env import is_env_var_present
+from harness_sdk.env import is_env_flag_enabled
 from harness_sdk.excluded_by_attribute_span_processor import ExcludeByAttributeSpanProcessor
 from harness_sdk.db_control_span_processor import DbControlSpanProcessor
 from harness_sdk.gen_ai_payload_scrub_span_processor import GenAiPayloadScrubSpanProcessor
@@ -25,7 +25,7 @@ class BuiltinPipelinePlugin:
         self._agent_init = AgentInit(config)
 
     def create_span_processors(self, config: Any) -> List[SpanProcessor]:
-        if is_env_var_present("ENABLE_CONSOLE_SPAN_EXPORTER"):
+        if is_env_flag_enabled("ENABLE_CONSOLE_SPAN_EXPORTER"):
             self._agent_init.set_console_span_processor()
             return []
 

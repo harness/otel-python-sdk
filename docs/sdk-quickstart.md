@@ -62,6 +62,8 @@ flag is on only when its value is `true`.
 | `HARNESS_ENABLE_AI_GOOGLE_GENAI` | Google GenAI (Gemini / Vertex AI) |
 | `HARNESS_ENABLE_AI_MCP` | Model Context Protocol |
 
+Each flag also accepts the `HA_` alias (e.g. `HA_ENABLE_API=true`); when both are set, the `HARNESS_` value wins. `AT_`/`TA_` aliases are not supported for these flags.
+
 ```bash
 # Example: HTTP/API instrumentation plus LiteLLM
 export HARNESS_ENABLE_API=true
@@ -145,7 +147,7 @@ Agent().instrument(skip_libraries=["requests"])
 
 | Variable | Effect |
 |---|---|
-| `HARNESS_GEN_AI_PAYLOAD_CAPTURE_ENABLED` | `false` to omit prompt/response bodies from spans |
+| `HARNESS_GEN_AI_PAYLOAD_CAPTURE_ENABLED` | `true` to capture prompt/response bodies in spans (default: off) |
 | `HARNESS_SPAN_ATTRIBUTES` | extra attributes on every span, e.g. `env=prod,team=ai` |
 | `HARNESS_OBSERVABILITY_PLUGINS` | `builtin_span_attributes` to keep instrumentation but disable the SDK's own OTLP exporter (if you already export spans yourself) |
 | `HARNESS_ENABLED` | `false` to disable the SDK entirely (no code change) |
