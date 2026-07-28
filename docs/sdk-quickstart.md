@@ -62,6 +62,8 @@ flag is on only when its value is `true`.
 | `HARNESS_ENABLE_AI_GOOGLE_GENAI` | Google GenAI (Gemini / Vertex AI) |
 | `HARNESS_ENABLE_AI_MCP` | Model Context Protocol |
 
+Each flag also accepts the `HA_` alias (e.g. `HA_ENABLE_API=true`); when both are set, the `HARNESS_` value wins. `AT_`/`TA_` aliases are not supported for these flags.
+
 ```bash
 # Example: HTTP/API instrumentation plus LiteLLM
 export HARNESS_ENABLE_API=true

@@ -39,7 +39,7 @@ Key variables:
 | `HARNESS_GEN_AI_PAYLOAD_CAPTURE_ENABLED` | Capture LLM prompt/response payloads (default: off) |
 | `HARNESS_GEN_AI_PAYLOAD_EVALUATION_ENABLED` | Run control plugins on GenAI spans |
 
-### Instrumentation opt-in (strict `HARNESS_` prefix, no legacy aliases)
+### Instrumentation opt-in (`HARNESS_` or `HA_` prefix; `HARNESS_` wins — no `AT_`/`TA_` aliases)
 
 Instrumentation is opt-in: `Agent().instrument()` instruments nothing unless a flag below is set to `true`. Categorization and gating live in `src/harness_sdk/instrumentation/instrumentation_definitions.py` (`is_library_enabled`, `is_api_instrumentation_enabled`, `any_ai_provider_enabled`), enforced in `Agent.instrument()`.
 
