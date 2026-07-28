@@ -14,9 +14,13 @@ def get_env_value(target_key):
     return None
 
 
-def is_env_var_present(target_key):
-    """Return True if the key is set under any supported prefix (presence check)."""
-    return any(f"{prefix}{target_key}" in os.environ for prefix in _PREFIXES)
+def is_env_flag_enabled(target_key):
+    """Boolean SDK flag under any supported prefix (HARNESS_ > HA_ > AT_ > TA_).
+
+    Returns True only when the resolved value is case-insensitively 'true'.
+    """
+    value = get_env_value(target_key)
+    return value is not None and value.strip().lower() == "true"
 
 
 def is_harness_flag_enabled(env_var_name):

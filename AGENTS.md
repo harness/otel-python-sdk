@@ -21,7 +21,7 @@ RUN_SDK_INTEGRATION_TESTS=1 ./scripts/run-unit-tests.sh
 
 ## Environment variable naming
 
-All SDK config uses the `HARNESS_` prefix. `HA_`, `AT_`, and `TA_` are legacy aliases accepted for backwards compatibility. When a setting is defined under multiple prefixes, precedence is `HARNESS_` > `HA_` > `AT_` > `TA_`. Resolution lives in `src/harness_sdk/env.py` (`get_env_value`, `is_env_var_present`, `is_harness_flag_enabled`).
+All SDK config uses the `HARNESS_` prefix. `HA_`, `AT_`, and `TA_` are legacy aliases accepted for backwards compatibility. When a setting is defined under multiple prefixes, precedence is `HARNESS_` > `HA_` > `AT_` > `TA_`. Resolution lives in `src/harness_sdk/env.py` (`get_env_value`, `is_env_flag_enabled`, `is_harness_flag_enabled`).
 
 Key variables:
 | Variable | Purpose |
@@ -34,7 +34,7 @@ Key variables:
 | `HARNESS_REPORTING_COMPRESSION` | `gzip` or empty |
 | `HARNESS_CONTROL_PLUGINS` | Comma-separated control plugin names |
 | `HARNESS_OBSERVABILITY_PLUGINS` | Comma-separated observability plugin names |
-| `HARNESS_ENABLE_CONSOLE_SPAN_EXPORTER` | Set to any value to dump spans to stdout |
+| `HARNESS_ENABLE_CONSOLE_SPAN_EXPORTER` | `true` to dump spans to stdout (default: off) |
 | `HARNESS_CONFIG_FILE` | Path to YAML config file (overrides env) |
 | `HARNESS_GEN_AI_PAYLOAD_CAPTURE_ENABLED` | Capture LLM prompt/response payloads (default: off) |
 | `HARNESS_GEN_AI_PAYLOAD_EVALUATION_ENABLED` | Run control plugins on GenAI spans |
