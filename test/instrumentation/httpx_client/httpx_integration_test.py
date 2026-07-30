@@ -9,11 +9,12 @@ from opentelemetry.trace import SpanKind
 from test.instrumentation.flask.app import FlaskServer
 
 
-def _client_span(spans):
+def _client_span(spans, url):
     for span in spans:
-        if span.kind == SpanKind.CLIENT:
-            return json.loads(span.to_json())
-    raise AssertionError('No client span found')
+        span_data = json.loads(span.to_json())
+        if span.kind == SpanKind.CLIENT and span_data['attributes'].get('http.url') == url:
+            return span_data
+    raise AssertionError(f'No client span found for {url}')
 
 
 def test_httpx_client_get(agent, exporter):
@@ -38,11 +39,11 @@ def test_httpx_client_get(agent, exporter):
 
         spans = exporter.get_finished_spans()
         assert spans
-        client_span = _client_span(spans)
+        client_span = _client_span(spans, url)
 
         assert client_span['attributes']['http.method'] == 'GET'
         assert client_span['attributes']['http.url'] == url
-        assert client_span['attributes']['http.response.body'] == '{ "a": "a", "xyz": "xyz" }'
+        assert 'http.response.body' not in client_span['attributes']
         assert client_span['attributes']['http.status_code'] == 200
         assert client_span['attributes']['http.response.header.tester3'] == 'tester3'
     finally:
@@ -71,15 +72,16 @@ def test_httpx_client_post(agent, exporter):
 
         spans = exporter.get_finished_spans()
         assert spans
-        client_span = _client_span(spans)
+        client_span = _client_span(spans, url)
 
         assert client_span['kind'] == "SpanKind.CLIENT"
         assert client_span['attributes']['http.method'] == 'POST'
         assert client_span['attributes']['http.url'] == url
         assert client_span['attributes']['http.request.header.content-type'] == 'application/json'
         assert client_span['attributes']['http.request.body'] == '{"test":"body"}'
-        assert client_span['attributes']['http.response.body'] == '{ "a": "a", "xyz": "xyz" }'
+        assert 'http.response.body' not in client_span['attributes']
         assert client_span['attributes']['http.status_code'] == 200
+        assert client_span['attributes']['http.response.header.tester3'] == 'tester3'
     finally:
         server.shutdown()
 
@@ -114,7 +116,7 @@ async def test_httpx_async_client_post(agent, exporter):
 
     span_list = exporter.get_finished_spans()
     assert span_list
-    httpx_span = _client_span(span_list)
+    httpx_span = _client_span(span_list, url)
 
     assert httpx_span['attributes']['http.method'] == 'POST'
     assert httpx_span['attributes']['http.url'] == url
@@ -122,6 +124,6 @@ async def test_httpx_async_client_post(agent, exporter):
     assert httpx_span['attributes']['http.request.header.tester2'] == 'tester2'
     assert httpx_span['attributes']['http.request.body'] == '{ "a":"b", "c": "d" }'
     assert httpx_span['attributes']['http.response.header.content-type'] == 'application/json'
-    assert httpx_span['attributes']['http.response.body'] == '{ "a": "a", "xyz": "xyz" }'
+    assert 'http.response.body' not in httpx_span['attributes']
     assert httpx_span['attributes']['http.status_code'] == 200
     server.shutdown()
