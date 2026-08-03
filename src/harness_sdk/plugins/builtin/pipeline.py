@@ -9,6 +9,8 @@ from harness_sdk.custom_logger import get_custom_logger
 from harness_sdk.env import is_env_flag_enabled
 from harness_sdk.excluded_by_attribute_span_processor import ExcludeByAttributeSpanProcessor
 from harness_sdk.db_control_span_processor import DbControlSpanProcessor
+from harness_sdk.flatten_dict_registry import is_flatten_enabled
+from harness_sdk.flatten_dict_span_processor import FlattenDictSpanProcessor
 from harness_sdk.gen_ai_payload_scrub_span_processor import GenAiPayloadScrubSpanProcessor
 
 logger = get_custom_logger(__name__)
@@ -43,10 +45,14 @@ class BuiltinPipelinePlugin:
             excluded_value="nospan",
         )
         db_control_processor = DbControlSpanProcessor(filter_processor)
-        # Outermost: scrub GenAI payload attributes before any other on_end
-        # logic (control evaluation, filtering, batching) sees the span.
+        # Scrub GenAI payload attributes before control evaluation, filtering
+        # and batching see the span.
         scrub_processor = GenAiPayloadScrubSpanProcessor(db_control_processor)
-        return [scrub_processor]
+        if not is_flatten_enabled():
+            return [scrub_processor]
+        # Outermost: dict attributes must be expanded into their flat keys
+        # before scrubbing and exclusion match on attribute keys.
+        return [FlattenDictSpanProcessor(scrub_processor)]
 
     def shutdown(self) -> None:
         pass

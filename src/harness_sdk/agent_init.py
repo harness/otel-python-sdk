@@ -18,6 +18,8 @@ from opentelemetry.sdk.resources import Resource
 from harness_sdk import constants
 from harness_sdk.config import config_pb2
 from harness_sdk.env import is_env_flag_enabled
+from harness_sdk.flatten_dict_registry import is_flatten_enabled
+from harness_sdk.flatten_dict_span_processor import FlattenDictSpanProcessor
 from harness_sdk.otlp_reporting import (
     compression_type_to_otlp_grpc,
     compression_type_to_otlp_http,
@@ -97,8 +99,10 @@ class AgentInit:  # pylint: disable=R0902,R0903
     def set_console_span_processor(self) -> None:
         console_span_exporter = ConsoleSpanExporter(
             service_name=self._config.config.service_name)
-        simple_export_span_processor = SimpleSpanProcessor(console_span_exporter)
-        trace.get_tracer_provider().add_span_processor(simple_export_span_processor)
+        processor = SimpleSpanProcessor(console_span_exporter)
+        if is_flatten_enabled():
+            processor = FlattenDictSpanProcessor(processor)
+        trace.get_tracer_provider().add_span_processor(processor)
 
     def init_exporter(self, trace_reporter_type):
         exporter_type = ''
