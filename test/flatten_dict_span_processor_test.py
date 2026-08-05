@@ -247,5 +247,14 @@ def test_flatten_disabled_only_when_explicitly_false(monkeypatch):
     monkeypatch.setenv(f"HARNESS_{FLATTEN_ENABLED_ENV}", "false")
     assert is_flatten_enabled() is False
 
+    monkeypatch.setenv(f"HARNESS_{FLATTEN_ENABLED_ENV}", "FALSE")
+    assert is_flatten_enabled() is False
+
     monkeypatch.setenv(f"HARNESS_{FLATTEN_ENABLED_ENV}", "true")
     assert is_flatten_enabled() is True
+
+
+def test_flatten_stays_enabled_for_non_false_values(monkeypatch):
+    for value in ("", "1", "yes", "on", "garbage"):
+        monkeypatch.setenv(f"HARNESS_{FLATTEN_ENABLED_ENV}", value)
+        assert is_flatten_enabled() is True

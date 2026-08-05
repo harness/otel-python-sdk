@@ -27,10 +27,11 @@ _MAX_TRACKED_SPANS = 2048
 
 
 def is_flatten_enabled():
-    """Dict flattening is on unless explicitly disabled."""
-    if get_env_value(FLATTEN_ENABLED_ENV) is None:
+    """Dict flattening is on by default; only explicit ``false`` disables it."""
+    value = get_env_value(FLATTEN_ENABLED_ENV)
+    if value is None:
         return True
-    return is_env_flag_enabled(FLATTEN_ENABLED_ENV)
+    return value.strip().lower() != "false"
 
 
 def is_raw_json_enabled():

@@ -194,8 +194,9 @@ before export. Flattening rules:
 At most 32 leaf attributes are emitted per dictionary; the rest are dropped with a debug
 log. The original key (`agent`) is not set unless
 `HARNESS_SPAN_ATTRIBUTE_FLATTEN_RAW_JSON=true`, which additionally stores the whole dict
-as JSON there. Set `HARNESS_SPAN_ATTRIBUTE_FLATTEN_ENABLED=false` to turn flattening off,
-in which case OTel rejects dictionary values as it did before.
+as JSON there. Flattening is **enabled by default**; set
+`HARNESS_SPAN_ATTRIBUTE_FLATTEN_ENABLED=false` to turn it off, in which case OTel rejects
+dictionary values as it did before.
 
 ## Plugins
 
