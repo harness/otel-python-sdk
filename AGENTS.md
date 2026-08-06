@@ -38,6 +38,10 @@ Key variables:
 | `HARNESS_CONFIG_FILE` | Path to YAML config file (overrides env) |
 | `HARNESS_GEN_AI_PAYLOAD_CAPTURE_ENABLED` | Capture LLM prompt/response payloads (default: off) |
 | `HARNESS_GEN_AI_PAYLOAD_EVALUATION_ENABLED` | Run control plugins on GenAI spans |
+| `HARNESS_SPAN_ATTRIBUTE_FLATTEN_ENABLED` | Flatten dict values from `set_span_attribute` into dot-notation keys (default: on; only `false` disables) |
+| `HARNESS_SPAN_ATTRIBUTE_FLATTEN_MAX_DEPTH` | Max nesting depth when flattening dicts (default: 3) |
+| `HARNESS_SPAN_ATTRIBUTE_FLATTEN_MAX_LEAVES` | Max leaf attributes emitted per dict (default: 32) |
+| `HARNESS_SPAN_ATTRIBUTE_FLATTEN_RAW_JSON` | Also keep the original key as a JSON string when flattening (default: off) |
 
 ### Instrumentation opt-in (`HARNESS_` or `HA_` prefix; `HARNESS_` wins — no `AT_`/`TA_` aliases)
 

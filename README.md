@@ -168,6 +168,37 @@ For duplicate keys, the last write wins; instrumentation can overwrite a custome
 if it writes the same key later. Because the span already exists, these attributes
 cannot influence head sampling.
 
+#### Dictionary values
+
+Dictionaries are also accepted and are flattened into dot-notation attributes so each
+leaf stays individually queryable in the backend:
+
+```python
+set_span_attribute("agent", {"action": "generate", "model": {"name": "gemini-2.0"}})
+# exported as: agent.action="generate", agent.model.name="gemini-2.0"
+```
+
+Nothing is serialized when you call the helper — the dict is flattened at span end, just
+before export. Flattening rules:
+
+| Case | Result |
+|---|---|
+| `str` / `bool` / `int` / `float` leaf | kept as the native OTel type |
+| `None` leaf | skipped |
+| Any other object | `str(value)` |
+| List of same-typed scalars | OTel array attribute at that key |
+| List of dicts or mixed types | JSON string at that key |
+| Nesting deeper than the configured max depth (default 3) | JSON string at the depth limit |
+| Flattened key already set on the span | skipped — the explicit value wins |
+
+At most `HARNESS_SPAN_ATTRIBUTE_FLATTEN_MAX_LEAVES` leaf attributes are emitted per
+dictionary (default 32); the rest are dropped with a debug log. Override depth via
+`HARNESS_SPAN_ATTRIBUTE_FLATTEN_MAX_DEPTH` (default 3). The original key (`agent`) is not set unless
+`HARNESS_SPAN_ATTRIBUTE_FLATTEN_RAW_JSON=true`, which additionally stores the whole dict
+as JSON there. Flattening is **enabled by default**; set
+`HARNESS_SPAN_ATTRIBUTE_FLATTEN_ENABLED=false` to turn it off, in which case OTel rejects
+dictionary values as it did before.
+
 ## Plugins
 
 The SDK loads extensions via [setuptools entry points](https://setuptools.pypa.io/en/latest/userguide/entry_point.html). Each plugin has a **name** (the entry-point key). Names are listed in config or environment variables; only installed plugins are loaded, in the order you configure.
