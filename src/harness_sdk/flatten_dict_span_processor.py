@@ -20,13 +20,12 @@ from opentelemetry.sdk.trace import SpanProcessor
 from harness_sdk.custom_logger import get_custom_logger
 from harness_sdk.flatten_dict_registry import (
     get_registry,
+    get_flatten_max_depth,
+    get_flatten_max_leaves,
     is_raw_json_enabled,
 )
 
 logger = get_custom_logger(__name__)
-
-MAX_DEPTH = 3
-MAX_LEAF_ATTRIBUTES = 32
 
 _SCALAR_TYPES = (bool, int, float, str)
 
@@ -75,15 +74,15 @@ def _leaf_value(value):
     return str(value)
 
 
-def _collect(prefix, mapping, depth, flattened):
+def _collect(prefix, mapping, depth, flattened, max_depth, max_leaves):
     """Walk ``mapping`` into ``flattened``; returns False once the cap is hit."""
     for key, value in mapping.items():
-        if len(flattened) >= MAX_LEAF_ATTRIBUTES:
+        if len(flattened) >= max_leaves:
             return False
         flat_key = f"{prefix}.{key}"
         if isinstance(value, Mapping):
-            if depth < MAX_DEPTH:
-                if not _collect(flat_key, value, depth + 1, flattened):
+            if depth < max_depth:
+                if not _collect(flat_key, value, depth + 1, flattened, max_depth, max_leaves):
                     return False
             else:
                 flattened[flat_key] = _to_json(value)
@@ -122,15 +121,17 @@ class FlattenDictSpanProcessor(SpanProcessor):
         if attributes is None:
             return
         raw_json = is_raw_json_enabled()
+        max_depth = get_flatten_max_depth()
+        max_leaves = get_flatten_max_leaves()
         for root_key, value in pending.items():
             flattened = {}
-            if not _collect(root_key, value, 1, flattened):
+            if not _collect(root_key, value, 1, flattened, max_depth, max_leaves):
                 logger.debug(
                     "Flatten: dict attribute %r on span %s exceeded %s leaf "
                     "attributes; remaining entries dropped",
                     root_key,
                     getattr(span, "name", None),
-                    MAX_LEAF_ATTRIBUTES,
+                    max_leaves,
                 )
             for flat_key, leaf in flattened.items():
                 # An explicitly set attribute always wins over a flattened one.

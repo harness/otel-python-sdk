@@ -188,11 +188,12 @@ before export. Flattening rules:
 | Any other object | `str(value)` |
 | List of same-typed scalars | OTel array attribute at that key |
 | List of dicts or mixed types | JSON string at that key |
-| Nesting deeper than 3 levels | JSON string at the depth-3 key |
+| Nesting deeper than the configured max depth (default 3) | JSON string at the depth limit |
 | Flattened key already set on the span | skipped — the explicit value wins |
 
-At most 32 leaf attributes are emitted per dictionary; the rest are dropped with a debug
-log. The original key (`agent`) is not set unless
+At most `HARNESS_SPAN_ATTRIBUTE_FLATTEN_MAX_LEAVES` leaf attributes are emitted per
+dictionary (default 32); the rest are dropped with a debug log. Override depth via
+`HARNESS_SPAN_ATTRIBUTE_FLATTEN_MAX_DEPTH` (default 3). The original key (`agent`) is not set unless
 `HARNESS_SPAN_ATTRIBUTE_FLATTEN_RAW_JSON=true`, which additionally stores the whole dict
 as JSON there. Flattening is **enabled by default**; set
 `HARNESS_SPAN_ATTRIBUTE_FLATTEN_ENABLED=false` to turn it off, in which case OTel rejects

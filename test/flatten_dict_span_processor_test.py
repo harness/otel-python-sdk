@@ -6,17 +6,19 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import INVALID_SPAN
 
 from harness_sdk.flatten_dict_registry import (
+    DEFAULT_MAX_LEAVES,
     FLATTEN_ENABLED_ENV,
+    FLATTEN_MAX_DEPTH_ENV,
+    FLATTEN_MAX_LEAVES_ENV,
     FLATTEN_RAW_JSON_ENV,
     FlattenDictRegistry,
+    get_flatten_max_depth,
+    get_flatten_max_leaves,
     get_registry,
     is_flatten_enabled,
     is_raw_json_enabled,
 )
-from harness_sdk.flatten_dict_span_processor import (
-    MAX_LEAF_ATTRIBUTES,
-    FlattenDictSpanProcessor,
-)
+from harness_sdk.flatten_dict_span_processor import FlattenDictSpanProcessor
 
 
 class RecordingProcessor:
@@ -158,12 +160,12 @@ def test_explicit_attribute_wins_over_flattened_key(downstream):
 
 
 def test_leaf_cap_stops_flattening(downstream):
-    oversized = {f"key{index}": index for index in range(MAX_LEAF_ATTRIBUTES + 10)}
+    oversized = {f"key{index}": index for index in range(DEFAULT_MAX_LEAVES + 10)}
 
     attributes = _ended_attributes(downstream, {"agent": oversized})
 
     flattened = [key for key in attributes if key.startswith("agent.")]
-    assert len(flattened) == MAX_LEAF_ATTRIBUTES
+    assert len(flattened) == DEFAULT_MAX_LEAVES
 
 
 def test_raw_json_flag_also_sets_original_key(downstream, monkeypatch):
@@ -258,3 +260,33 @@ def test_flatten_stays_enabled_for_non_false_values(monkeypatch):
     for value in ("", "1", "yes", "on", "garbage"):
         monkeypatch.setenv(f"HARNESS_{FLATTEN_ENABLED_ENV}", value)
         assert is_flatten_enabled() is True
+
+
+def test_flatten_limits_default(monkeypatch):
+    for prefix in ("HARNESS_", "HA_", "AT_", "TA_"):
+        monkeypatch.delenv(f"{prefix}{FLATTEN_MAX_DEPTH_ENV}", raising=False)
+        monkeypatch.delenv(f"{prefix}{FLATTEN_MAX_LEAVES_ENV}", raising=False)
+    assert get_flatten_max_depth() == 3
+    assert get_flatten_max_leaves() == 32
+
+
+def test_flatten_limits_from_env(monkeypatch, downstream):
+    monkeypatch.setenv(f"HARNESS_{FLATTEN_MAX_DEPTH_ENV}", "2")
+
+    assert get_flatten_max_depth() == 2
+
+    depth_attrs = _ended_attributes(
+        downstream,
+        {"agent": {"l1": {"l2": {"l3": {"l4": "deep"}}}}},
+    )
+    assert depth_attrs["agent.l1.l2"] == json.dumps({"l3": {"l4": "deep"}})
+
+
+def test_flatten_leaf_limit_from_env(monkeypatch, downstream):
+    monkeypatch.setenv(f"HARNESS_{FLATTEN_MAX_LEAVES_ENV}", "5")
+
+    leaf_attrs = _ended_attributes(
+        downstream,
+        {"agent": {f"key{index}": index for index in range(10)}},
+    )
+    assert len([key for key in leaf_attrs if key.startswith("agent.")]) == 5

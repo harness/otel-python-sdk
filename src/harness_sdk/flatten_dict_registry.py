@@ -20,6 +20,11 @@ logger = get_custom_logger(__name__)
 
 FLATTEN_ENABLED_ENV = "SPAN_ATTRIBUTE_FLATTEN_ENABLED"
 FLATTEN_RAW_JSON_ENV = "SPAN_ATTRIBUTE_FLATTEN_RAW_JSON"
+FLATTEN_MAX_DEPTH_ENV = "SPAN_ATTRIBUTE_FLATTEN_MAX_DEPTH"
+FLATTEN_MAX_LEAVES_ENV = "SPAN_ATTRIBUTE_FLATTEN_MAX_LEAVES"
+
+DEFAULT_MAX_DEPTH = 3
+DEFAULT_MAX_LEAVES = 32
 
 # Bound on spans holding pending dicts. A span that is never ended would
 # otherwise leak its entry forever; oldest entries are evicted instead.
@@ -37,6 +42,25 @@ def is_flatten_enabled():
 def is_raw_json_enabled():
     """Opt in to additionally keeping the original key as a JSON string."""
     return is_env_flag_enabled(FLATTEN_RAW_JSON_ENV)
+
+
+def _positive_int_env(env_key, default):
+    raw = (get_env_value(env_key) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+        return value if value > 0 else default
+    except ValueError:
+        return default
+
+
+def get_flatten_max_depth():
+    return _positive_int_env(FLATTEN_MAX_DEPTH_ENV, DEFAULT_MAX_DEPTH)
+
+
+def get_flatten_max_leaves():
+    return _positive_int_env(FLATTEN_MAX_LEAVES_ENV, DEFAULT_MAX_LEAVES)
 
 
 def _span_key(span):
