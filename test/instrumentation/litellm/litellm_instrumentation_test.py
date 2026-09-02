@@ -88,7 +88,9 @@ def test_litellm_completion_span_has_gen_ai_attributes(agent, exporter, litellm_
     assert attrs.get("gen_ai.response.model") == "gpt-4o-mini"
     assert attrs.get("gen_ai.response.id") == "chatcmpl-test"
     assert attrs.get("gen_ai.response.finish_reasons") == "['stop']"
-    assert attrs.get("gen_ai.usage.input_tokens") == 3
+    # LiteLLM prompt_tokens is cache-inclusive (3 = 0 uncached + 1 read + 2 write).
+    # gen_ai.usage.input_tokens must be the uncached remainder so buckets are disjoint.
+    assert attrs.get("gen_ai.usage.input_tokens") == 0
     assert attrs.get("gen_ai.usage.output_tokens") == 5
     assert attrs.get("gen_ai.usage.total_tokens") == 8
     assert attrs.get("gen_ai.usage.cache_read.input_tokens") == 1
@@ -198,7 +200,7 @@ async def test_litellm_async_completion_span(agent, exporter, litellm_instrument
     assert attrs.get("gen_ai.response.model") == "gpt-4o-mini"
     assert attrs.get("gen_ai.response.id") == "chatcmpl-test"
     assert attrs.get("gen_ai.response.finish_reasons") == "['stop']"
-    assert attrs.get("gen_ai.usage.input_tokens") == 3
+    assert attrs.get("gen_ai.usage.input_tokens") == 0
     assert attrs.get("gen_ai.usage.output_tokens") == 5
     assert attrs.get("gen_ai.usage.total_tokens") == 8
 
@@ -300,8 +302,45 @@ async def test_litellm_async_completion_emits_single_span(agent, exporter, litel
     llm_spans = _litellm_spans(spans)
     assert len(llm_spans) == 1
     attrs = llm_spans[0].attributes
-    assert attrs.get("gen_ai.usage.input_tokens") == 3
+    assert attrs.get("gen_ai.usage.input_tokens") == 0
     assert attrs.get("gen_ai.usage.output_tokens") == 5
+
+
+def test_litellm_anthropic_input_tokens_are_already_cache_exclusive(
+    agent, exporter, litellm_instrumentor
+):  # pylint: disable=unused-argument
+    def _anthropic_shaped(*_args, **_kwargs):
+        return {
+            "id": "msg-test",
+            "model": "claude-sonnet-4",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "hello"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "input_tokens": 15,
+                "output_tokens": 5,
+                "cache_read_input_tokens": 80,
+                "cache_creation_input_tokens": 5,
+            },
+        }
+
+    with patch("litellm.main.completion", new=_anthropic_shaped):
+        litellm_instrumentor.instrument()
+        litellm.completion(
+            model="claude-sonnet-4",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+    spans = exporter.get_finished_spans()
+    exporter.clear()
+    attrs = _request_span(spans).attributes
+    assert attrs.get("gen_ai.usage.input_tokens") == 15
+    assert attrs.get("gen_ai.usage.cache_read.input_tokens") == 80
+    assert attrs.get("gen_ai.usage.cache_creation.input_tokens") == 5
 
 
 def test_litellm_embedding_dict_response(agent, exporter, litellm_instrumentor):  # pylint: disable=unused-argument
