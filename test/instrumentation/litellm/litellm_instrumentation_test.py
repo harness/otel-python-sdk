@@ -88,8 +88,6 @@ def test_litellm_completion_span_has_gen_ai_attributes(agent, exporter, litellm_
     assert attrs.get("gen_ai.response.model") == "gpt-4o-mini"
     assert attrs.get("gen_ai.response.id") == "chatcmpl-test"
     assert attrs.get("gen_ai.response.finish_reasons") == "['stop']"
-    # LiteLLM prompt_tokens is cache-inclusive (3 = 0 uncached + 1 read + 2 write).
-    # gen_ai.usage.input_tokens must be the uncached remainder so buckets are disjoint.
     assert attrs.get("gen_ai.usage.input_tokens") == 0
     assert attrs.get("gen_ai.usage.output_tokens") == 5
     assert attrs.get("gen_ai.usage.total_tokens") == 8
