@@ -75,7 +75,7 @@ jobs:
       - name: Unit tests
         run: |
           export RUN_SDK_INTEGRATION_TESTS=1
-          python -m pytest --log-cli-level=INFO --tb=long
+          python -m pytest -p scripts.litellm_pydantic_pytest_plugin --log-cli-level=INFO --tb=long
         env:
           PYTHONUNBUFFERED: 1
           HA_ENABLE_CONSOLE_SPAN_EXPORTER: "true"
@@ -84,7 +84,7 @@ jobs:
         if: matrix.python-version == '3.12'
         run: |
           export RUN_SDK_INTEGRATION_TESTS=1
-          python -m pytest --log-cli-level=INFO --tb=long \
+          python -m pytest -p scripts.litellm_pydantic_pytest_plugin --log-cli-level=INFO --tb=long \
             --cov=harness_sdk --cov-report=xml:coverage.xml --junitxml=pytest-report.xml
         env:
           PYTHONUNBUFFERED: 1
