@@ -4,6 +4,7 @@
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from harness_sdk.plugins.control import get_control_registry
+from harness_sdk.gen_ai.exceptions import ControlRequestBlocked
 from harness_sdk.instrumentation import BaseInstrumentorWrapper
 from harness_sdk.instrumentation.httpx.utils import (
     decode_response_body_for_capture,
@@ -42,7 +43,14 @@ class HTTPXClientInstrumentorWrapper(HTTPXClientInstrumentor, BaseInstrumentorWr
         headers = headers_from_httpx(request_info.headers)
         body = read_request_body(request_info.stream)
         self.generic_request_handler(headers, body, span)
-        get_control_registry().evaluate(span, url, headers, body, False)
+        control_result = get_control_registry().evaluate(span, url, headers, body, False)
+        if control_result.block:
+            logger.debug(
+                "httpx request blocked by control plugin: url=%s status=%s",
+                url,
+                control_result.response_status_code,
+            )
+            raise ControlRequestBlocked(control_result)
 
     def _process_response(self, span, response_info):
         headers = headers_from_httpx(response_info.headers)
