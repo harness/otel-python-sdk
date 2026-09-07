@@ -5,6 +5,7 @@ from concurrent import futures
 
 import grpc
 import pytest
+from opentelemetry.trace import SpanKind
 
 from harness_sdk.agent import Agent
 from harness_sdk.config.config import Config
@@ -49,7 +50,7 @@ def exporter(agent_with_rpc_body_disabled):
 def _server_span(spans):
     for span in spans:
         attrs = span.attributes or {}
-        if attrs.get("rpc.system") == "grpc" and span.kind.name == "SERVER":
+        if attrs.get("rpc.system") == "grpc" and span.kind == SpanKind.SERVER:
             return json.loads(span.to_json())
     raise AssertionError("No gRPC server span found")
 
