@@ -71,17 +71,28 @@ def any_ai_provider_enabled(enabled_ai_frameworks=None):
     )
 
 
+def _is_gen_ai_master_enabled() -> bool:
+    """Return False when gen_ai.enabled / HA_GEN_AI_ENABLED resolves to disabled."""
+    from harness_sdk.config.config import Config  # pylint: disable=import-outside-toplevel
+
+    return Config().config.gen_ai.enabled.value
+
+
 def is_library_enabled(library_key, enabled_ai_frameworks=None):
     """Decide whether a supported library should be instrumented based on opt-in env flags."""
     if library_key in AI_LIBRARY_ENV_FLAGS:
+        if not _is_gen_ai_master_enabled():
+            return False
+        if enabled_ai_frameworks is not None:
+            configured_frameworks = {
+                _normalize_library_name(name)
+                for name in enabled_ai_frameworks
+            }
+            return _normalize_library_name(library_key) in configured_frameworks
         env_flag = AI_LIBRARY_ENV_FLAGS[library_key]
         if is_enable_flag_present(env_flag):
             return is_harness_flag_enabled(env_flag)
-        configured_frameworks = {
-            _normalize_library_name(name)
-            for name in (enabled_ai_frameworks or [])
-        }
-        return _normalize_library_name(library_key) in configured_frameworks
+        return False
     if library_key in API_LIBRARIES:
         return is_api_instrumentation_enabled()
     return False

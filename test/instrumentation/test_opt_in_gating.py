@@ -55,18 +55,30 @@ def test_config_enables_ai_provider_when_env_is_unset():
     assert any_ai_provider_enabled(["openai"]) is True
 
 
-def test_explicit_ai_env_false_overrides_config():
+def test_explicit_ai_env_false_does_not_disable_configured_allowlist():
     os.environ["HARNESS_ENABLE_AI_OPENAI"] = "false"
 
-    assert is_library_enabled(OPENAI_KEY, ["openai"]) is False
-    assert any_ai_provider_enabled(["openai"]) is False
+    assert is_library_enabled(OPENAI_KEY, ["openai"]) is True
+    assert any_ai_provider_enabled(["openai"]) is True
 
 
-def test_explicit_ai_env_true_overrides_config():
+def test_explicit_ai_env_true_does_not_override_empty_config_allowlist():
     os.environ["HARNESS_ENABLE_AI_OPENAI"] = "true"
 
-    assert is_library_enabled(OPENAI_KEY, []) is True
-    assert any_ai_provider_enabled([]) is True
+    assert is_library_enabled(OPENAI_KEY, []) is False
+    assert any_ai_provider_enabled([]) is False
+
+
+def test_gen_ai_master_switch_disables_all_ai_providers():
+    from harness_sdk.config.config import Config
+
+    Config._instance = None
+    os.environ["HA_GEN_AI_ENABLED"] = "false"
+    os.environ["HARNESS_ENABLE_AI_OPENAI"] = "true"
+    Config()
+
+    assert is_library_enabled(OPENAI_KEY) is False
+    assert any_ai_provider_enabled() is False
 
 
 def test_flag_requires_exact_true_value():

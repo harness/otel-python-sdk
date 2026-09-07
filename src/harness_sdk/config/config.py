@@ -97,14 +97,17 @@ def build_config():
 
     plugins_config = config_dict.pop('plugins', {})
     gen_ai_config = config_dict.get('gen_ai', {})
-    enabled_ai_frameworks = gen_ai_config.pop('enabled_frameworks', [])
-    if not isinstance(enabled_ai_frameworks, list):
-        enabled_ai_frameworks = []
-    enabled_ai_frameworks = [
-        str(name).strip()
-        for name in enabled_ai_frameworks
-        if str(name).strip()
-    ]
+    if 'enabled_frameworks' in gen_ai_config:
+        enabled_ai_frameworks = gen_ai_config.pop('enabled_frameworks', [])
+        if not isinstance(enabled_ai_frameworks, list):
+            enabled_ai_frameworks = []
+        enabled_ai_frameworks = [
+            str(name).strip()
+            for name in enabled_ai_frameworks
+            if str(name).strip()
+        ]
+    else:
+        enabled_ai_frameworks = None
 
     enabled_control_plugins = _parse_plugin_env('CONTROL_PLUGINS')
     if enabled_control_plugins is None:
