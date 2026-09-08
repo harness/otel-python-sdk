@@ -1,0 +1,7 @@
+data_capture:
+  rpc_body:
+    request: false
+    response: false
+  rpc_metadata:
+    request: false
+    response: false
