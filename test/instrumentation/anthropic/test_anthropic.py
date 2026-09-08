@@ -368,6 +368,7 @@ def test_messages_stream_sync_span_after_consume(agent, exporter, anthropic_inst
     assert len(spans) == 1
     attrs = spans[0].attributes
     assert attrs.get("gen_ai.system") == "anthropic"
+    assert attrs.get("gen_ai.request.streaming") is True
     assert attrs.get("gen_ai.usage.output_tokens") == 5
 
 
@@ -428,6 +429,7 @@ async def test_messages_stream_async_span_after_consume(agent, exporter, anthrop
     spans = exporter.get_finished_spans()
     exporter.clear()
     assert len(spans) == 1
+    assert spans[0].attributes.get("gen_ai.request.streaming") is True
     assert spans[0].attributes.get("gen_ai.usage.output_tokens") == 5
 
 
