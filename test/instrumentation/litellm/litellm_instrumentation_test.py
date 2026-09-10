@@ -84,6 +84,7 @@ def test_litellm_completion_span_has_gen_ai_attributes(agent, exporter, litellm_
     assert attrs.get("gen_ai.request.model") == "gpt-4o-mini"
     assert attrs.get("gen_ai.operation.name") == "chat"
     assert attrs.get("gen_ai.provider.name") == "openai"
+    assert attrs.get("GENAI_API_TYPE") == "openai"
     assert "gen_ai.system" not in attrs
     assert attrs.get("gen_ai.framework") == "litellm"
     assert attrs.get("gen_ai.response.model") == "gpt-4o-mini"
@@ -547,6 +548,7 @@ async def test_litellm_anthropic_acreate_span_has_gen_ai_attributes(  # pylint: 
     assert attrs.get("gen_ai.request.model") == "bedrock/anthropic.claude-sonnet-4"
     assert attrs.get("gen_ai.operation.name") == "chat"
     assert attrs.get("gen_ai.provider.name") == "aws.bedrock"
+    assert attrs.get("GENAI_API_TYPE") == "anthropic"
     assert attrs.get("gen_ai.framework") == "litellm"
     assert attrs.get("gen_ai.request.max_tokens") == 32
     assert attrs.get("gen_ai.request.temperature") == 0.2

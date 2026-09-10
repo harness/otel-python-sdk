@@ -47,6 +47,9 @@ logger = get_custom_logger(__name__)
 
 _LITELLM_MAIN = "litellm.main"
 _LITELLM_REQUEST_SPAN_NAME = "litellm_request"
+_GENAI_API_TYPE_ATTRIBUTE = "GENAI_API_TYPE"
+_OPENAI_API_TYPE = "openai"
+_ANTHROPIC_API_TYPE = "anthropic"
 _ANTHROPIC_MESSAGES_MODULES = (
     "litellm.anthropic_interface.messages",
     "litellm.anthropic.messages",
@@ -88,15 +91,15 @@ _BEDROCK_MODEL_ID_HEADER = "x-amzn-bedrock-model-id"
 _LITELLM_PROVIDER_HEADER_PREFIX = "llm_provider-"
 
 _WRAPPED_FUNCTIONS = (
-    ("completion", False),
-    ("acompletion", True),
-    ("embedding", False),
-    ("aembedding", True),
+    ("completion", False, _OPENAI_API_TYPE),
+    ("acompletion", True, _OPENAI_API_TYPE),
+    ("embedding", False, _OPENAI_API_TYPE),
+    ("aembedding", True, _OPENAI_API_TYPE),
 )
 
 _ANTHROPIC_MESSAGES_FUNCTIONS = (
-    ("create", False),
-    ("acreate", True),
+    ("create", False, _ANTHROPIC_API_TYPE),
+    ("acreate", True, _ANTHROPIC_API_TYPE),
 )
 
 _PROVIDER_NAME_MAP = {
@@ -197,6 +200,7 @@ class _PreCallSpanContext:
     payload: Any
     kwargs: dict[str, Any]
     call_type: str
+    api_type: str
 
 
 def _set_pre_call_request_attributes(
@@ -214,6 +218,9 @@ def _set_pre_call_request_attributes(
     )
     otel_logger.safe_set_attribute(
         span, "gen_ai.provider.name", _canonical_provider_name(provider)
+    )
+    otel_logger.safe_set_attribute(
+        span, _GENAI_API_TYPE_ATTRIBUTE, pre_call.api_type
     )
     otel_logger.safe_set_attribute(span, "gen_ai.framework", "litellm")
     otel_logger.safe_set_attribute(
@@ -837,12 +844,17 @@ def _fail_pre_call_span(span: Any, exc: BaseException, *, blocked: bool = False)
 def _start_evaluated_span(
     otel_logger: Any,
     func_name: str,
+    api_type: str,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:
     model, payload = _extract_model_and_input(args, kwargs)
     pre_call = _PreCallSpanContext(
-        model=model, payload=payload, kwargs=kwargs, call_type=func_name
+        model=model,
+        payload=payload,
+        kwargs=kwargs,
+        call_type=func_name,
+        api_type=api_type,
     )
     span = otel_logger.tracer.start_span(_LITELLM_REQUEST_SPAN_NAME)
     try:
@@ -861,6 +873,7 @@ def _start_evaluated_span(
 class _LiteLLMSpanRun:
     otel_logger: Any
     func_name: str
+    api_type: str
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
     request_model: Optional[str] = None
@@ -871,7 +884,11 @@ class _LiteLLMSpanRun:
     def __enter__(self) -> "_LiteLLMSpanRun":
         self.request_model, _ = _extract_model_and_input(self.args, self.kwargs)
         self.span = _start_evaluated_span(
-            self.otel_logger, self.func_name, self.args, self.kwargs
+            self.otel_logger,
+            self.func_name,
+            self.api_type,
+            self.args,
+            self.kwargs,
         )
         self.token = _activate_span(self.span)
         self.guard = _LITELLM_SPAN_ACTIVE.set(True)
@@ -923,7 +940,9 @@ class _LiteLLMSpanRun:
         return False
 
 
-def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
+def _make_wrapper(
+    func_name: str, is_async: bool, api_type: str
+) -> Callable[..., Any]:
     otel_logger = _get_otel_logger()
 
     def _sync_wrapper(
@@ -937,7 +956,9 @@ def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
         if _LITELLM_SPAN_ACTIVE.get():
             return wrapped(*args, **kwargs)
 
-        with _LiteLLMSpanRun(otel_logger, func_name, args, kwargs) as span_run:
+        with _LiteLLMSpanRun(
+            otel_logger, func_name, api_type, args, kwargs
+        ) as span_run:
             response = wrapped(*args, **kwargs)
             if _is_stream_response(response):
                 return span_run.wrap_stream(response)
@@ -953,7 +974,9 @@ def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
         if _LITELLM_SPAN_ACTIVE.get():
             return await wrapped(*args, **kwargs)
 
-        with _LiteLLMSpanRun(otel_logger, func_name, args, kwargs) as span_run:
+        with _LiteLLMSpanRun(
+            otel_logger, func_name, api_type, args, kwargs
+        ) as span_run:
             response = await wrapped(*args, **kwargs)
             if _is_stream_response(response):
                 return span_run.wrap_stream(response)
@@ -1003,20 +1026,20 @@ def _iter_anthropic_messages_modules() -> list[tuple[str, Any]]:
 
 def _wrap_anthropic_messages() -> None:
     for mod_name, mod in _iter_anthropic_messages_modules():
-        for func_name, is_async in _ANTHROPIC_MESSAGES_FUNCTIONS:
+        for func_name, is_async, api_type in _ANTHROPIC_MESSAGES_FUNCTIONS:
             if not hasattr(mod, func_name):
                 continue
             wrapt.wrap_function_wrapper(
                 mod_name,
                 func_name,
-                _make_wrapper(func_name, is_async),
+                _make_wrapper(func_name, is_async, api_type),
             )
             _rebind_public_function(mod, func_name)
 
 
 def _unwrap_anthropic_messages() -> None:
     for _mod_name, mod in _iter_anthropic_messages_modules():
-        for func_name, _ in _ANTHROPIC_MESSAGES_FUNCTIONS:
+        for func_name, _, _ in _ANTHROPIC_MESSAGES_FUNCTIONS:
             if not hasattr(mod, func_name):
                 continue
             try:
@@ -1047,11 +1070,11 @@ class LiteLLMInstrumentorWrapper(BaseInstrumentorWrapper):
             import litellm  # pylint: disable=import-outside-toplevel
 
             main_mod = __import__(_LITELLM_MAIN, fromlist=["*"])
-            for func_name, is_async in _WRAPPED_FUNCTIONS:
+            for func_name, is_async, api_type in _WRAPPED_FUNCTIONS:
                 wrapt.wrap_function_wrapper(
                     _LITELLM_MAIN,
                     func_name,
-                    _make_wrapper(func_name, is_async),
+                    _make_wrapper(func_name, is_async, api_type),
                 )
                 if hasattr(litellm, func_name):
                     setattr(litellm, func_name, getattr(main_mod, func_name))
@@ -1072,7 +1095,7 @@ class LiteLLMInstrumentorWrapper(BaseInstrumentorWrapper):
 
         errors: list[Exception] = []
         mod = import_module(_LITELLM_MAIN)
-        for func_name, _ in _WRAPPED_FUNCTIONS:
+        for func_name, _, _ in _WRAPPED_FUNCTIONS:
             try:
                 unwrap(mod, func_name)
                 if hasattr(litellm, func_name):
