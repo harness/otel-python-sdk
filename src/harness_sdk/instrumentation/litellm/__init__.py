@@ -512,16 +512,138 @@ def _is_stream_response(response: Any) -> bool:
     return hasattr(response, "__anext__") or hasattr(response, "__next__")
 
 
-def _aggregate_stream_response(chunks: list[Any], messages: Any) -> Any:
-    """Rebuild a complete ``ModelResponse`` from streamed chunks.
+_ANTHROPIC_STREAM_EVENT_TYPES = frozenset(
+    {
+        "message_start",
+        "message_delta",
+        "message_stop",
+        "content_block_start",
+        "content_block_delta",
+        "content_block_stop",
+        "ping",
+    }
+)
 
-    Uses ``litellm.stream_chunk_builder`` (the same helper LiteLLM uses
-    internally) so usage, choices, finish_reason and content are aggregated
-    exactly as they would be for a non-streaming call. Falls back to the last
-    chunk that carries usage if the builder is unavailable or fails.
+
+def _decode_sse_chunk(chunk: Any) -> list[Any]:
+    """Turn raw SSE bytes/str frames into JSON events; pass other chunks through."""
+    if not isinstance(chunk, (bytes, bytearray, str)):
+        return [chunk]
+    if isinstance(chunk, (bytes, bytearray)):
+        try:
+            text = chunk.decode("utf-8")
+        except Exception:  # pylint: disable=broad-except
+            return []
+    else:
+        text = chunk
+    stripped = text.strip()
+    if not stripped:
+        return []
+    if stripped.startswith("{") or stripped.startswith("["):
+        try:
+            parsed = json.loads(stripped)
+            return parsed if isinstance(parsed, list) else [parsed]
+        except json.JSONDecodeError:
+            pass
+
+    events: list[Any] = []
+    for frame in text.replace("\r\n", "\n").split("\n\n"):
+        data_lines = [
+            line[5:].lstrip() for line in frame.split("\n") if line.startswith("data:")
+        ]
+        if not data_lines:
+            continue
+        payload = "\n".join(data_lines).strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            events.append(json.loads(payload))
+        except json.JSONDecodeError:
+            logger.debug("LiteLLM: skipped undecodable SSE payload")
+    return events
+
+
+def _is_anthropic_stream_event(obj: Any) -> bool:
+    event_type = _get_value(obj, "type")
+    return isinstance(event_type, str) and event_type in _ANTHROPIC_STREAM_EVENT_TYPES
+
+
+def _looks_like_anthropic_messages_stream(chunks: list[Any]) -> bool:
+    for chunk in chunks:
+        if isinstance(chunk, (bytes, bytearray)) and b"data:" in chunk:
+            return True
+        if isinstance(chunk, str) and "data:" in chunk:
+            return True
+        for event in _decode_sse_chunk(chunk):
+            if _is_anthropic_stream_event(event):
+                return True
+    return False
+
+
+def _merge_usage_fields(target: dict[str, Any], usage: Any) -> None:
+    if usage is None:
+        return
+    for key in (
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+    ):
+        value = _get_value(usage, key)
+        if value is not None:
+            target[key] = value
+
+
+def _aggregate_anthropic_messages_stream(chunks: list[Any]) -> dict[str, Any]:
+    """Merge Anthropic Messages SSE/event chunks into one response-shaped dict.
+
+    Native streams never put ``id`` / ``usage`` / ``stop_reason`` on a single
+    last chunk. ``message_start`` carries id, model, and input tokens;
+    ``message_delta`` carries ``delta.stop_reason`` and output tokens.
+    """
+    aggregated: dict[str, Any] = {"usage": {}}
+    usage = aggregated["usage"]
+    for chunk in chunks:
+        for event in _decode_sse_chunk(chunk):
+            event_type = _get_value(event, "type")
+            if event_type == "message_start":
+                message = _get_value(event, "message") or {}
+                response_id = _get_value(message, "id")
+                if response_id is not None:
+                    aggregated["id"] = response_id
+                model = _get_value(message, "model")
+                if model is not None:
+                    aggregated["model"] = model
+                _merge_usage_fields(usage, _get_value(message, "usage"))
+                continue
+            if event_type == "message_delta":
+                delta = _get_value(event, "delta") or {}
+                stop_reason = _get_value(delta, "stop_reason") or _get_value(
+                    event, "stop_reason"
+                )
+                if stop_reason is not None:
+                    aggregated["stop_reason"] = stop_reason
+                _merge_usage_fields(usage, _get_value(event, "usage"))
+                _merge_usage_fields(usage, _get_value(delta, "usage"))
+                continue
+            _merge_usage_fields(usage, _get_value(event, "usage"))
+    if not usage:
+        aggregated.pop("usage", None)
+    return aggregated
+
+
+def _aggregate_stream_response(chunks: list[Any], messages: Any) -> Any:
+    """Rebuild a complete response from streamed chunks.
+
+    Anthropic Messages streams (SSE bytes or ``message_start`` /
+    ``message_delta`` events) are merged across the whole stream. OpenAI-shaped
+    LiteLLM streams still use ``litellm.stream_chunk_builder``, then fall back
+    to the last chunk that carries usage.
     """
     if not chunks:
         return None
+    if _looks_like_anthropic_messages_stream(chunks):
+        return _aggregate_anthropic_messages_stream(chunks)
     try:
         import litellm  # pylint: disable=import-outside-toplevel
 

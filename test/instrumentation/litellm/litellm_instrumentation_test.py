@@ -611,13 +611,22 @@ async def test_litellm_anthropic_acreate_streaming_defers_until_consumed(  # pyl
     async def _streaming_acreate(*_args, **_kwargs):
         return _FakeAnthropicStream(
             [
-                {"type": "content_block_delta", "delta": {"text": "hello"}},
+                (
+                    b'data: {"type":"message_start","message":{"id":"msg_stream",'
+                    b'"type":"message","role":"assistant","model":"claude-sonnet-4",'
+                    b'"content":[],"usage":{"input_tokens":6,"output_tokens":1}}}\n\n'
+                ),
                 {
-                    "id": "msg_stream",
-                    "model": "claude-sonnet-4",
-                    "stop_reason": "end_turn",
-                    "usage": {"input_tokens": 6, "output_tokens": 2},
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": "hello"},
                 },
+                {
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                    "usage": {"output_tokens": 2},
+                },
+                {"type": "message_stop"},
             ]
         )
 
@@ -630,13 +639,15 @@ async def test_litellm_anthropic_acreate_streaming_defers_until_consumed(  # pyl
         assert len(_litellm_spans(exporter.get_finished_spans())) == 0
 
         chunks = [chunk async for chunk in stream]
-        assert len(chunks) == 2
+        assert len(chunks) == 4
 
     spans = _litellm_spans(exporter.get_finished_spans())
     exporter.clear()
     assert len(spans) == 1
     attrs = spans[0].attributes
     assert attrs.get("gen_ai.request.streaming") == "True"
+    assert attrs.get("gen_ai.response.id") == "msg_stream"
+    assert attrs.get("gen_ai.response.model") == "claude-sonnet-4"
     assert attrs.get("gen_ai.response.finish_reasons") == "['end_turn']"
     assert attrs.get("gen_ai.usage.input_tokens") == 6
     assert attrs.get("gen_ai.usage.output_tokens") == 2
