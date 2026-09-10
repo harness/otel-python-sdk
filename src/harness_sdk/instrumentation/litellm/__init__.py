@@ -5,6 +5,8 @@ telemetry, plus Traceable pre-call policy evaluation via libtraceable.
 Coverage:
   - litellm.completion / litellm.acompletion
   - litellm.embedding / litellm.aembedding
+  - litellm.anthropic.messages.create / acreate
+    (and litellm.messages.create / acreate when those names alias the same functions)
 
 Wraps the public entry points so evaluation runs on an active span before the
 provider call. The wrapper enriches that span with response metadata before it
@@ -45,6 +47,11 @@ logger = get_custom_logger(__name__)
 
 _LITELLM_MAIN = "litellm.main"
 _LITELLM_REQUEST_SPAN_NAME = "litellm_request"
+_ANTHROPIC_MESSAGES_MODULES = (
+    "litellm.anthropic_interface.messages",
+    "litellm.anthropic.messages",
+    "litellm.messages",
+)
 
 _LITELLM_SPAN_ACTIVE: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "harness_litellm_span_active", default=False
@@ -85,6 +92,11 @@ _WRAPPED_FUNCTIONS = (
     ("acompletion", True),
     ("embedding", False),
     ("aembedding", True),
+)
+
+_ANTHROPIC_MESSAGES_FUNCTIONS = (
+    ("create", False),
+    ("acreate", True),
 )
 
 _PROVIDER_NAME_MAP = {
@@ -290,7 +302,13 @@ class _LiteLLMResponseMetadata:
             finish_reason = _get_value(choice, "finish_reason")
             if finish_reason:
                 finish_reasons.append(str(finish_reason))
-        return finish_reasons
+        if finish_reasons:
+            return finish_reasons
+        # Anthropic Messages responses use stop_reason instead of choices.
+        stop_reason = self.value("stop_reason")
+        if stop_reason:
+            return [str(stop_reason)]
+        return []
 
     def header_maps(self) -> list[dict[Any, Any]]:
         hidden = self.hidden_params()
@@ -823,6 +841,74 @@ def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
     return _async_wrapper if is_async else _sync_wrapper
 
 
+def _rebind_public_function(source_mod: Any, func_name: str) -> None:
+    """Copy a wrapped function onto LiteLLM's public aliases.
+
+    wrapt patches the implementation module in place. ``from .messages import
+    acreate`` (and any ``litellm.messages`` alias) still holds the original
+    function object until rebound, the same way ``litellm.acompletion`` is
+    rebound after wrapping ``litellm.main.acompletion``.
+    """
+    import litellm  # pylint: disable=import-outside-toplevel
+
+    wrapped = getattr(source_mod, func_name)
+    for holder in (
+        getattr(getattr(litellm, "anthropic", None), "messages", None),
+        getattr(litellm, "anthropic", None),
+        getattr(litellm, "messages", None),
+        source_mod,
+    ):
+        if holder is not None and hasattr(holder, func_name):
+            setattr(holder, func_name, wrapped)
+
+
+def _iter_anthropic_messages_modules() -> list[tuple[str, Any]]:
+    from importlib import import_module  # pylint: disable=import-outside-toplevel
+
+    seen: set[int] = set()
+    modules: list[tuple[str, Any]] = []
+    for mod_name in _ANTHROPIC_MESSAGES_MODULES:
+        try:
+            mod = import_module(mod_name)
+        except ImportError:
+            continue
+        if id(mod) in seen:
+            continue
+        seen.add(id(mod))
+        modules.append((mod_name, mod))
+    return modules
+
+
+def _wrap_anthropic_messages() -> None:
+    for mod_name, mod in _iter_anthropic_messages_modules():
+        for func_name, is_async in _ANTHROPIC_MESSAGES_FUNCTIONS:
+            if not hasattr(mod, func_name):
+                continue
+            wrapt.wrap_function_wrapper(
+                mod_name,
+                func_name,
+                _make_wrapper(func_name, is_async),
+            )
+            _rebind_public_function(mod, func_name)
+
+
+def _unwrap_anthropic_messages() -> None:
+    for _mod_name, mod in _iter_anthropic_messages_modules():
+        for func_name, _ in _ANTHROPIC_MESSAGES_FUNCTIONS:
+            if not hasattr(mod, func_name):
+                continue
+            try:
+                unwrap(mod, func_name)
+                _rebind_public_function(mod, func_name)
+            except Exception as err:  # pylint: disable=broad-except
+                # Optional interface: skip if this LiteLLM version never wrapped it.
+                logger.debug(
+                    "LiteLLM anthropic messages %s unwrap skipped: %s",
+                    func_name,
+                    err,
+                )
+
+
 class LiteLLMInstrumentorWrapper(BaseInstrumentorWrapper):
     """Instrument LiteLLM with its OpenTelemetry SDK and Traceable policy evaluation."""
 
@@ -847,6 +933,7 @@ class LiteLLMInstrumentorWrapper(BaseInstrumentorWrapper):
                 )
                 if hasattr(litellm, func_name):
                     setattr(litellm, func_name, getattr(main_mod, func_name))
+            _wrap_anthropic_messages()
             LiteLLMInstrumentorWrapper._applied = True
             logger.debug("Traceable LiteLLM instrumentation applied.")
         except ImportError as err:
@@ -871,6 +958,8 @@ class LiteLLMInstrumentorWrapper(BaseInstrumentorWrapper):
             except Exception as err:  # pylint: disable=broad-except
                 logger.error("Failed to uninstrument LiteLLM %s: %s", func_name, err)
                 errors.append(err)
+
+        _unwrap_anthropic_messages()
 
         _unregister_otel_callback()
         global _otel_logger  # pylint: disable=global-statement
