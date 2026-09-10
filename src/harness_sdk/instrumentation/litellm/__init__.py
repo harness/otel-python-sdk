@@ -438,8 +438,23 @@ def _set_response_attributes(
     prompt_details = _get_value(usage, "prompt_tokens_details")
     completion_details = _get_value(usage, "completion_tokens_details")
 
-    input_tokens = _get_value(usage, "prompt_tokens")
-    if input_tokens is None:
+    cache_read = _get_value(usage, "cache_read_input_tokens")
+    if cache_read is None:
+        cache_read = _get_value(prompt_details, "cached_tokens")
+    cache_creation = _get_value(usage, "cache_creation_input_tokens")
+    if cache_creation is None:
+        cache_creation = _get_value(prompt_details, "cache_creation_tokens")
+
+    prompt_tokens = _get_value(usage, "prompt_tokens")
+    if prompt_tokens is not None:
+        # LiteLLM's OpenAI-shaped prompt_tokens is cache-inclusive. Emit
+        # disjoint gen_ai.usage buckets so input_tokens matches uncached input.
+        input_tokens = max(
+            int(prompt_tokens or 0) - int(cache_read or 0) - int(cache_creation or 0),
+            0,
+        )
+    else:
+        # Anthropic-shaped input_tokens is already cache-exclusive.
         input_tokens = _get_value(usage, "input_tokens")
 
     output_tokens = _get_value(usage, "completion_tokens")
@@ -458,15 +473,13 @@ def _set_response_attributes(
         otel_logger,
         span,
         "gen_ai.usage.cache_read.input_tokens",
-        _get_value(usage, "cache_read_input_tokens")
-        or _get_value(prompt_details, "cached_tokens"),
+        cache_read,
     )
     _set_if_present(
         otel_logger,
         span,
         "gen_ai.usage.cache_creation.input_tokens",
-        _get_value(usage, "cache_creation_input_tokens")
-        or _get_value(prompt_details, "cache_creation_tokens"),
+        cache_creation,
     )
     _set_if_present(
         otel_logger,
