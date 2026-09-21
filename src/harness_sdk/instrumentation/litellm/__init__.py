@@ -5,6 +5,8 @@ telemetry, plus Traceable pre-call policy evaluation via libtraceable.
 Coverage:
   - litellm.completion / litellm.acompletion
   - litellm.embedding / litellm.aembedding
+  - litellm.anthropic.messages.create / acreate
+    (and litellm.messages.create / acreate when those names alias the same functions)
 
 Wraps the public entry points so evaluation runs on an active span before the
 provider call. The wrapper enriches that span with response metadata before it
@@ -45,6 +47,14 @@ logger = get_custom_logger(__name__)
 
 _LITELLM_MAIN = "litellm.main"
 _LITELLM_REQUEST_SPAN_NAME = "litellm_request"
+_GENAI_API_TYPE_ATTRIBUTE = "GENAI_API_TYPE"
+_OPENAI_API_TYPE = "openai"
+_ANTHROPIC_API_TYPE = "anthropic"
+_ANTHROPIC_MESSAGES_MODULES = (
+    "litellm.anthropic_interface.messages",
+    "litellm.anthropic.messages",
+    "litellm.messages",
+)
 
 _LITELLM_SPAN_ACTIVE: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "harness_litellm_span_active", default=False
@@ -81,10 +91,15 @@ _BEDROCK_MODEL_ID_HEADER = "x-amzn-bedrock-model-id"
 _LITELLM_PROVIDER_HEADER_PREFIX = "llm_provider-"
 
 _WRAPPED_FUNCTIONS = (
-    ("completion", False),
-    ("acompletion", True),
-    ("embedding", False),
-    ("aembedding", True),
+    ("completion", False, _OPENAI_API_TYPE),
+    ("acompletion", True, _OPENAI_API_TYPE),
+    ("embedding", False, _OPENAI_API_TYPE),
+    ("aembedding", True, _OPENAI_API_TYPE),
+)
+
+_ANTHROPIC_MESSAGES_FUNCTIONS = (
+    ("create", False, _ANTHROPIC_API_TYPE),
+    ("acreate", True, _ANTHROPIC_API_TYPE),
 )
 
 _PROVIDER_NAME_MAP = {
@@ -185,6 +200,7 @@ class _PreCallSpanContext:
     payload: Any
     kwargs: dict[str, Any]
     call_type: str
+    api_type: str
 
 
 def _set_pre_call_request_attributes(
@@ -202,6 +218,9 @@ def _set_pre_call_request_attributes(
     )
     otel_logger.safe_set_attribute(
         span, "gen_ai.provider.name", _canonical_provider_name(provider)
+    )
+    otel_logger.safe_set_attribute(
+        span, _GENAI_API_TYPE_ATTRIBUTE, pre_call.api_type
     )
     otel_logger.safe_set_attribute(span, "gen_ai.framework", "litellm")
     otel_logger.safe_set_attribute(
@@ -290,7 +309,13 @@ class _LiteLLMResponseMetadata:
             finish_reason = _get_value(choice, "finish_reason")
             if finish_reason:
                 finish_reasons.append(str(finish_reason))
-        return finish_reasons
+        if finish_reasons:
+            return finish_reasons
+        # Anthropic Messages responses use stop_reason instead of choices.
+        stop_reason = self.value("stop_reason")
+        if stop_reason:
+            return [str(stop_reason)]
+        return []
 
     def header_maps(self) -> list[dict[Any, Any]]:
         hidden = self.hidden_params()
@@ -494,16 +519,138 @@ def _is_stream_response(response: Any) -> bool:
     return hasattr(response, "__anext__") or hasattr(response, "__next__")
 
 
-def _aggregate_stream_response(chunks: list[Any], messages: Any) -> Any:
-    """Rebuild a complete ``ModelResponse`` from streamed chunks.
+_ANTHROPIC_STREAM_EVENT_TYPES = frozenset(
+    {
+        "message_start",
+        "message_delta",
+        "message_stop",
+        "content_block_start",
+        "content_block_delta",
+        "content_block_stop",
+        "ping",
+    }
+)
 
-    Uses ``litellm.stream_chunk_builder`` (the same helper LiteLLM uses
-    internally) so usage, choices, finish_reason and content are aggregated
-    exactly as they would be for a non-streaming call. Falls back to the last
-    chunk that carries usage if the builder is unavailable or fails.
+
+def _decode_sse_chunk(chunk: Any) -> list[Any]:
+    """Turn raw SSE bytes/str frames into JSON events; pass other chunks through."""
+    if not isinstance(chunk, (bytes, bytearray, str)):
+        return [chunk]
+    if isinstance(chunk, (bytes, bytearray)):
+        try:
+            text = chunk.decode("utf-8")
+        except Exception:  # pylint: disable=broad-except
+            return []
+    else:
+        text = chunk
+    stripped = text.strip()
+    if not stripped:
+        return []
+    if stripped.startswith("{") or stripped.startswith("["):
+        try:
+            parsed = json.loads(stripped)
+            return parsed if isinstance(parsed, list) else [parsed]
+        except json.JSONDecodeError:
+            pass
+
+    events: list[Any] = []
+    for frame in text.replace("\r\n", "\n").split("\n\n"):
+        data_lines = [
+            line[5:].lstrip() for line in frame.split("\n") if line.startswith("data:")
+        ]
+        if not data_lines:
+            continue
+        payload = "\n".join(data_lines).strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            events.append(json.loads(payload))
+        except json.JSONDecodeError:
+            logger.debug("LiteLLM: skipped undecodable SSE payload")
+    return events
+
+
+def _is_anthropic_stream_event(obj: Any) -> bool:
+    event_type = _get_value(obj, "type")
+    return isinstance(event_type, str) and event_type in _ANTHROPIC_STREAM_EVENT_TYPES
+
+
+def _looks_like_anthropic_messages_stream(chunks: list[Any]) -> bool:
+    for chunk in chunks:
+        if isinstance(chunk, (bytes, bytearray)) and b"data:" in chunk:
+            return True
+        if isinstance(chunk, str) and "data:" in chunk:
+            return True
+        for event in _decode_sse_chunk(chunk):
+            if _is_anthropic_stream_event(event):
+                return True
+    return False
+
+
+def _merge_usage_fields(target: dict[str, Any], usage: Any) -> None:
+    if usage is None:
+        return
+    for key in (
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+    ):
+        value = _get_value(usage, key)
+        if value is not None:
+            target[key] = value
+
+
+def _aggregate_anthropic_messages_stream(chunks: list[Any]) -> dict[str, Any]:
+    """Merge Anthropic Messages SSE/event chunks into one response-shaped dict.
+
+    Native streams never put ``id`` / ``usage`` / ``stop_reason`` on a single
+    last chunk. ``message_start`` carries id, model, and input tokens;
+    ``message_delta`` carries ``delta.stop_reason`` and output tokens.
+    """
+    aggregated: dict[str, Any] = {"usage": {}}
+    usage = aggregated["usage"]
+    for chunk in chunks:
+        for event in _decode_sse_chunk(chunk):
+            event_type = _get_value(event, "type")
+            if event_type == "message_start":
+                message = _get_value(event, "message") or {}
+                response_id = _get_value(message, "id")
+                if response_id is not None:
+                    aggregated["id"] = response_id
+                model = _get_value(message, "model")
+                if model is not None:
+                    aggregated["model"] = model
+                _merge_usage_fields(usage, _get_value(message, "usage"))
+                continue
+            if event_type == "message_delta":
+                delta = _get_value(event, "delta") or {}
+                stop_reason = _get_value(delta, "stop_reason") or _get_value(
+                    event, "stop_reason"
+                )
+                if stop_reason is not None:
+                    aggregated["stop_reason"] = stop_reason
+                _merge_usage_fields(usage, _get_value(event, "usage"))
+                _merge_usage_fields(usage, _get_value(delta, "usage"))
+                continue
+            _merge_usage_fields(usage, _get_value(event, "usage"))
+    if not usage:
+        aggregated.pop("usage", None)
+    return aggregated
+
+
+def _aggregate_stream_response(chunks: list[Any], messages: Any) -> Any:
+    """Rebuild a complete response from streamed chunks.
+
+    Anthropic Messages streams (SSE bytes or ``message_start`` /
+    ``message_delta`` events) are merged across the whole stream. OpenAI-shaped
+    LiteLLM streams still use ``litellm.stream_chunk_builder``, then fall back
+    to the last chunk that carries usage.
     """
     if not chunks:
         return None
+    if _looks_like_anthropic_messages_stream(chunks):
+        return _aggregate_anthropic_messages_stream(chunks)
     try:
         import litellm  # pylint: disable=import-outside-toplevel
 
@@ -697,12 +844,17 @@ def _fail_pre_call_span(span: Any, exc: BaseException, *, blocked: bool = False)
 def _start_evaluated_span(
     otel_logger: Any,
     func_name: str,
+    api_type: str,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:
     model, payload = _extract_model_and_input(args, kwargs)
     pre_call = _PreCallSpanContext(
-        model=model, payload=payload, kwargs=kwargs, call_type=func_name
+        model=model,
+        payload=payload,
+        kwargs=kwargs,
+        call_type=func_name,
+        api_type=api_type,
     )
     span = otel_logger.tracer.start_span(_LITELLM_REQUEST_SPAN_NAME)
     try:
@@ -721,6 +873,7 @@ def _start_evaluated_span(
 class _LiteLLMSpanRun:
     otel_logger: Any
     func_name: str
+    api_type: str
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
     request_model: Optional[str] = None
@@ -731,7 +884,11 @@ class _LiteLLMSpanRun:
     def __enter__(self) -> "_LiteLLMSpanRun":
         self.request_model, _ = _extract_model_and_input(self.args, self.kwargs)
         self.span = _start_evaluated_span(
-            self.otel_logger, self.func_name, self.args, self.kwargs
+            self.otel_logger,
+            self.func_name,
+            self.api_type,
+            self.args,
+            self.kwargs,
         )
         self.token = _activate_span(self.span)
         self.guard = _LITELLM_SPAN_ACTIVE.set(True)
@@ -783,7 +940,9 @@ class _LiteLLMSpanRun:
         return False
 
 
-def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
+def _make_wrapper(
+    func_name: str, is_async: bool, api_type: str
+) -> Callable[..., Any]:
     otel_logger = _get_otel_logger()
 
     def _sync_wrapper(
@@ -797,7 +956,9 @@ def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
         if _LITELLM_SPAN_ACTIVE.get():
             return wrapped(*args, **kwargs)
 
-        with _LiteLLMSpanRun(otel_logger, func_name, args, kwargs) as span_run:
+        with _LiteLLMSpanRun(
+            otel_logger, func_name, api_type, args, kwargs
+        ) as span_run:
             response = wrapped(*args, **kwargs)
             if _is_stream_response(response):
                 return span_run.wrap_stream(response)
@@ -813,7 +974,9 @@ def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
         if _LITELLM_SPAN_ACTIVE.get():
             return await wrapped(*args, **kwargs)
 
-        with _LiteLLMSpanRun(otel_logger, func_name, args, kwargs) as span_run:
+        with _LiteLLMSpanRun(
+            otel_logger, func_name, api_type, args, kwargs
+        ) as span_run:
             response = await wrapped(*args, **kwargs)
             if _is_stream_response(response):
                 return span_run.wrap_stream(response)
@@ -821,6 +984,74 @@ def _make_wrapper(func_name: str, is_async: bool) -> Callable[..., Any]:
             return response
 
     return _async_wrapper if is_async else _sync_wrapper
+
+
+def _rebind_public_function(source_mod: Any, func_name: str) -> None:
+    """Copy a wrapped function onto LiteLLM's public aliases.
+
+    wrapt patches the implementation module in place. ``from .messages import
+    acreate`` (and any ``litellm.messages`` alias) still holds the original
+    function object until rebound, the same way ``litellm.acompletion`` is
+    rebound after wrapping ``litellm.main.acompletion``.
+    """
+    import litellm  # pylint: disable=import-outside-toplevel
+
+    wrapped = getattr(source_mod, func_name)
+    for holder in (
+        getattr(getattr(litellm, "anthropic", None), "messages", None),
+        getattr(litellm, "anthropic", None),
+        getattr(litellm, "messages", None),
+        source_mod,
+    ):
+        if holder is not None and hasattr(holder, func_name):
+            setattr(holder, func_name, wrapped)
+
+
+def _iter_anthropic_messages_modules() -> list[tuple[str, Any]]:
+    from importlib import import_module  # pylint: disable=import-outside-toplevel
+
+    seen: set[int] = set()
+    modules: list[tuple[str, Any]] = []
+    for mod_name in _ANTHROPIC_MESSAGES_MODULES:
+        try:
+            mod = import_module(mod_name)
+        except ImportError:
+            continue
+        if id(mod) in seen:
+            continue
+        seen.add(id(mod))
+        modules.append((mod_name, mod))
+    return modules
+
+
+def _wrap_anthropic_messages() -> None:
+    for mod_name, mod in _iter_anthropic_messages_modules():
+        for func_name, is_async, api_type in _ANTHROPIC_MESSAGES_FUNCTIONS:
+            if not hasattr(mod, func_name):
+                continue
+            wrapt.wrap_function_wrapper(
+                mod_name,
+                func_name,
+                _make_wrapper(func_name, is_async, api_type),
+            )
+            _rebind_public_function(mod, func_name)
+
+
+def _unwrap_anthropic_messages() -> None:
+    for _mod_name, mod in _iter_anthropic_messages_modules():
+        for func_name, _, _ in _ANTHROPIC_MESSAGES_FUNCTIONS:
+            if not hasattr(mod, func_name):
+                continue
+            try:
+                unwrap(mod, func_name)
+                _rebind_public_function(mod, func_name)
+            except Exception as err:  # pylint: disable=broad-except
+                # Optional interface: skip if this LiteLLM version never wrapped it.
+                logger.debug(
+                    "LiteLLM anthropic messages %s unwrap skipped: %s",
+                    func_name,
+                    err,
+                )
 
 
 class LiteLLMInstrumentorWrapper(BaseInstrumentorWrapper):
@@ -839,14 +1070,15 @@ class LiteLLMInstrumentorWrapper(BaseInstrumentorWrapper):
             import litellm  # pylint: disable=import-outside-toplevel
 
             main_mod = __import__(_LITELLM_MAIN, fromlist=["*"])
-            for func_name, is_async in _WRAPPED_FUNCTIONS:
+            for func_name, is_async, api_type in _WRAPPED_FUNCTIONS:
                 wrapt.wrap_function_wrapper(
                     _LITELLM_MAIN,
                     func_name,
-                    _make_wrapper(func_name, is_async),
+                    _make_wrapper(func_name, is_async, api_type),
                 )
                 if hasattr(litellm, func_name):
                     setattr(litellm, func_name, getattr(main_mod, func_name))
+            _wrap_anthropic_messages()
             LiteLLMInstrumentorWrapper._applied = True
             logger.debug("Traceable LiteLLM instrumentation applied.")
         except ImportError as err:
@@ -863,7 +1095,7 @@ class LiteLLMInstrumentorWrapper(BaseInstrumentorWrapper):
 
         errors: list[Exception] = []
         mod = import_module(_LITELLM_MAIN)
-        for func_name, _ in _WRAPPED_FUNCTIONS:
+        for func_name, _, _ in _WRAPPED_FUNCTIONS:
             try:
                 unwrap(mod, func_name)
                 if hasattr(litellm, func_name):
@@ -871,6 +1103,8 @@ class LiteLLMInstrumentorWrapper(BaseInstrumentorWrapper):
             except Exception as err:  # pylint: disable=broad-except
                 logger.error("Failed to uninstrument LiteLLM %s: %s", func_name, err)
                 errors.append(err)
+
+        _unwrap_anthropic_messages()
 
         _unregister_otel_callback()
         global _otel_logger  # pylint: disable=global-statement
