@@ -273,6 +273,7 @@ def _make_stream_sync(handler: TelemetryHandler) -> Callable[..., Any]:
         merged_kwargs["stream"] = True
         params = extract_params(**merged_kwargs)
         invocation = _build_invocation(handler, params, instance, capture_content)
+        invocation.attributes["gen_ai.request.streaming"] = True
         try:
             _evaluate_invocation(invocation)
         except ControlEvaluationBlocked:
@@ -306,6 +307,7 @@ def _make_stream_async(handler: TelemetryHandler) -> Callable[..., Any]:
         merged_kwargs["stream"] = True
         params = extract_params(**merged_kwargs)
         invocation = _build_invocation(handler, params, instance, capture_content)
+        invocation.attributes["gen_ai.request.streaming"] = True
         try:
             _evaluate_invocation(invocation)
         except ControlEvaluationBlocked:

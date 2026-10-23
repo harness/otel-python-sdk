@@ -56,7 +56,8 @@ class GrpcInstrumentorServerWrapper(GrpcInstrumentorServer, BaseInstrumentorWrap
             logger.debug('Entering wrapper interceptors set')
             logger.debug(
                 'Setting server_interceptor_wrapper() as interceptor.')
-            kwargs["interceptors"] = [server_interceptor_wrapper(self)]
+            existing = list(kwargs.get("interceptors") or [])
+            kwargs["interceptors"] = [server_interceptor_wrapper(self)] + existing
             return self._original_wrapper_func(*args, **kwargs)
         grpc.server = server_wrapper
 

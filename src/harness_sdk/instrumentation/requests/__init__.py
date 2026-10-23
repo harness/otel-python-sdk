@@ -2,6 +2,7 @@
 import logging
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
 
+from harness_sdk.gen_ai.exceptions import ControlRequestBlocked
 from harness_sdk.plugins.control import get_control_registry
 from harness_sdk.instrumentation import BaseInstrumentorWrapper
 
@@ -28,7 +29,16 @@ class RequestsInstrumentorWrapper(RequestsInstrumentor, BaseInstrumentorWrapper)
         '''capture request data'''
         url = request_obj.url
         self.generic_request_handler(request_obj.headers, request_obj.body, span)
-        get_control_registry().evaluate(span, url, request_obj.headers, request_obj.body, False)
+        control_result = get_control_registry().evaluate(
+            span, url, request_obj.headers, request_obj.body, False
+        )
+        if control_result.block:
+            logger.debug(
+                "requests request blocked by control plugin: url=%s status=%s",
+                url,
+                control_result.response_status_code,
+            )
+            raise ControlRequestBlocked(control_result)
 
 
     def response_hook(self, span, _, response):

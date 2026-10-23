@@ -15,3 +15,12 @@ class ControlEvaluationBlocked(Exception):
         self.result = result
         msg = getattr(result, "response_message", None) or "Forbidden"
         super().__init__(msg)
+
+
+class ControlRequestBlocked(Exception):
+    """Raised when control registry ``evaluate`` returns ``block=True`` for an outbound request."""
+
+    def __init__(self, result: "ControlResult") -> None:
+        self.result = result
+        msg = getattr(result, "response_message", None) or "Forbidden"
+        super().__init__(msg)

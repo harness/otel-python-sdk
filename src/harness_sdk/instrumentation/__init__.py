@@ -25,11 +25,16 @@ class BaseInstrumentorWrapper:
     def __init__(self):
         '''constructor'''
         logger.debug('Entering BaseInstrumentorWrapper constructor.')
-        self._process_request_headers = Config()._instance.config.data_capture.http_headers.request.value
-        self._process_response_headers = Config()._instance.config.data_capture.http_headers.response.value
-        self._process_request_body = Config()._instance.config.data_capture.http_body.request.value
-        self._process_response_body = Config()._instance.config.data_capture.http_body.response.value
-        self._max_body_size = Config()._instance.config.data_capture.body_max_size_bytes.value
+        data_capture = Config()._instance.config.data_capture
+        self._process_request_headers = data_capture.http_headers.request.value
+        self._process_response_headers = data_capture.http_headers.response.value
+        self._process_request_body = data_capture.http_body.request.value
+        self._process_response_body = data_capture.http_body.response.value
+        self._process_rpc_request_metadata = data_capture.rpc_metadata.request.value
+        self._process_rpc_response_metadata = data_capture.rpc_metadata.response.value
+        self._process_rpc_request_body = data_capture.rpc_body.request.value
+        self._process_rpc_response_body = data_capture.rpc_body.response.value
+        self._max_body_size = data_capture.body_max_size_bytes.value
 
         proto_allowed_content_types = Config()._instance.config.data_capture.allowed_content_types
         self._allowed_content_types = [item.value for item in proto_allowed_content_types]
@@ -151,11 +156,11 @@ class BaseInstrumentorWrapper:
             logger.debug('Span is Recording!')
             lowercased_headers = self.lowercase_headers(request_headers)
 
-            # Log rpc metatdata if requested
-            if self._process_request_headers:
+            # Log rpc metadata if requested
+            if self._process_rpc_request_metadata:
                 self.add_headers_to_span(self.RPC_REQUEST_METADATA_PREFIX, span, lowercased_headers)
             # Log rpc body if requested
-            if self._process_response_body:
+            if self._process_rpc_request_body:
                 request_body_str = str(request_body)
                 request_body_str = self.grab_first_n_bytes(request_body_str)
                 span.set_attribute(self.RPC_REQUEST_BODY_PREFIX,
@@ -182,12 +187,12 @@ class BaseInstrumentorWrapper:
 
             logger.debug('Span is Recording!')
             lowercased_headers = self.lowercase_headers(response_headers)
-            # Log rpc metadata if requested?
-            if self._process_response_headers:
+            # Log rpc metadata if requested
+            if self._process_rpc_response_metadata:
                 logger.debug('Dumping Response Headers:')
                 self.add_headers_to_span(self.RPC_RESPONSE_METADATA_PREFIX, span, lowercased_headers)
             # Log rpc body if requested
-            if self._process_response_body:
+            if self._process_rpc_response_body:
                 response_body_str = str(response_body)
                 logger.debug('Processing response body')
                 response_body_str = self.grab_first_n_bytes(response_body_str)

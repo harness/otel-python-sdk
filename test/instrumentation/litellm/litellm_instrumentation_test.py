@@ -13,6 +13,7 @@ from litellm.types.utils import EmbeddingResponse, ModelResponse
 from harness_sdk.plugins.control import ControlResult, get_control_registry
 from harness_sdk.gen_ai.exceptions import ControlEvaluationBlocked
 from harness_sdk.instrumentation.litellm import LiteLLMInstrumentorWrapper
+import harness_sdk.instrumentation.litellm as harness_litellm
 
 
 @pytest.fixture
@@ -83,6 +84,7 @@ def test_litellm_completion_span_has_gen_ai_attributes(agent, exporter, litellm_
     assert attrs.get("gen_ai.request.model") == "gpt-4o-mini"
     assert attrs.get("gen_ai.operation.name") == "chat"
     assert attrs.get("gen_ai.provider.name") == "openai"
+    assert attrs.get("GENAI_API_TYPE") == "openai"
     assert "gen_ai.system" not in attrs
     assert attrs.get("gen_ai.framework") == "litellm"
     assert attrs.get("gen_ai.response.model") == "gpt-4o-mini"
@@ -468,3 +470,186 @@ def test_litellm_mock_response_with_wrapper_enrichment(agent, exporter, litellm_
     assert attrs.get("gen_ai.provider.name") == "openai"
     assert "gen_ai.system" not in attrs
     assert attrs.get("gen_ai.framework") == "litellm"
+
+
+def _fake_anthropic_message_response(*_args, **_kwargs):
+    return {
+        "id": "msg_test",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-4",
+        "content": [{"type": "text", "text": "hello"}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 10, "output_tokens": 5},
+    }
+
+
+class _FakeAnthropicStream:
+    def __init__(self, chunks):
+        self._chunks = list(chunks)
+        self._index = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._index >= len(self._chunks):
+            raise StopAsyncIteration
+        chunk = self._chunks[self._index]
+        self._index += 1
+        return chunk
+
+
+def _anthropic_messages_kwargs():
+    return {
+        "model": "bedrock/anthropic.claude-sonnet-4",
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 32,
+        "temperature": 0.2,
+        "custom_llm_provider": "bedrock",
+    }
+
+
+@pytest.mark.asyncio
+async def test_acreate_not_captured_when_only_acompletion_is_wrapped(  # pylint: disable=unused-argument
+    agent, exporter, litellm_instrumentor, monkeypatch
+):
+    # Pre-fix behavior: wrapping acompletion alone misses native Anthropic
+    # pass-through (acreate does not call acompletion).
+    monkeypatch.setattr(harness_litellm, "_ANTHROPIC_MESSAGES_FUNCTIONS", ())
+
+    async def _native_acreate(*_args, **_kwargs):
+        return _fake_anthropic_message_response()
+
+    with patch("litellm.anthropic_interface.messages.acreate", new=_native_acreate):
+        litellm_instrumentor.instrument()
+        await litellm.anthropic.messages.acreate(**_anthropic_messages_kwargs())
+
+    spans = _litellm_spans(exporter.get_finished_spans())
+    exporter.clear()
+    assert spans == []
+
+
+@pytest.mark.asyncio
+async def test_litellm_anthropic_acreate_span_has_gen_ai_attributes(  # pylint: disable=unused-argument
+    agent, exporter, litellm_instrumentor
+):
+    async def _native_acreate(*_args, **_kwargs):
+        return _fake_anthropic_message_response()
+
+    with patch("litellm.anthropic_interface.messages.acreate", new=_native_acreate):
+        litellm_instrumentor.instrument()
+        await litellm.anthropic.messages.acreate(**_anthropic_messages_kwargs())
+
+    spans = _litellm_spans(exporter.get_finished_spans())
+    exporter.clear()
+    assert len(spans) == 1
+    attrs = spans[0].attributes
+    assert attrs.get("gen_ai.request.model") == "bedrock/anthropic.claude-sonnet-4"
+    assert attrs.get("gen_ai.operation.name") == "chat"
+    assert attrs.get("gen_ai.provider.name") == "aws.bedrock"
+    assert attrs.get("GENAI_API_TYPE") == "anthropic"
+    assert attrs.get("gen_ai.framework") == "litellm"
+    assert attrs.get("gen_ai.request.max_tokens") == 32
+    assert attrs.get("gen_ai.request.temperature") == 0.2
+    assert attrs.get("gen_ai.response.id") == "msg_test"
+    assert attrs.get("gen_ai.response.model") == "claude-sonnet-4"
+    assert attrs.get("gen_ai.response.finish_reasons") == "['end_turn']"
+    assert attrs.get("gen_ai.usage.input_tokens") == 10
+    assert attrs.get("gen_ai.usage.output_tokens") == 5
+
+
+def test_litellm_anthropic_create_span_has_gen_ai_attributes(  # pylint: disable=unused-argument
+    agent, exporter, litellm_instrumentor
+):
+    with patch(
+        "litellm.anthropic_interface.messages.create",
+        new=_fake_anthropic_message_response,
+    ):
+        litellm_instrumentor.instrument()
+        litellm.anthropic.messages.create(**_anthropic_messages_kwargs())
+
+    spans = _litellm_spans(exporter.get_finished_spans())
+    exporter.clear()
+    assert len(spans) == 1
+    attrs = spans[0].attributes
+    assert attrs.get("gen_ai.request.model") == "bedrock/anthropic.claude-sonnet-4"
+    assert attrs.get("gen_ai.response.finish_reasons") == "['end_turn']"
+    assert attrs.get("gen_ai.usage.input_tokens") == 10
+
+
+@pytest.mark.asyncio
+async def test_litellm_anthropic_acreate_delegating_to_acompletion_emits_single_span(  # pylint: disable=unused-argument
+    agent, exporter, litellm_instrumentor
+):
+    async def _fake_async_completion(*_args, **_kwargs):
+        return _fake_model_response()
+
+    async def _delegating_acreate(*_args, **kwargs):
+        return await litellm.acompletion(
+            model=kwargs["model"],
+            messages=kwargs["messages"],
+        )
+
+    with patch("litellm.main.acompletion", new=_fake_async_completion), patch(
+        "litellm.anthropic_interface.messages.acreate", new=_delegating_acreate
+    ):
+        litellm_instrumentor.instrument()
+        await litellm.anthropic.messages.acreate(**_anthropic_messages_kwargs())
+
+    spans = _litellm_spans(exporter.get_finished_spans())
+    exporter.clear()
+    assert len(spans) == 1
+    attrs = spans[0].attributes
+    assert attrs.get("gen_ai.request.model") == "bedrock/anthropic.claude-sonnet-4"
+    assert attrs.get("gen_ai.usage.input_tokens") == 3
+    assert attrs.get("gen_ai.usage.output_tokens") == 5
+
+
+@pytest.mark.asyncio
+async def test_litellm_anthropic_acreate_streaming_defers_until_consumed(  # pylint: disable=unused-argument
+    agent, exporter, litellm_instrumentor
+):
+    async def _streaming_acreate(*_args, **_kwargs):
+        return _FakeAnthropicStream(
+            [
+                (
+                    b'data: {"type":"message_start","message":{"id":"msg_stream",'
+                    b'"type":"message","role":"assistant","model":"claude-sonnet-4",'
+                    b'"content":[],"usage":{"input_tokens":6,"output_tokens":1}}}\n\n'
+                ),
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": "hello"},
+                },
+                {
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                    "usage": {"output_tokens": 2},
+                },
+                {"type": "message_stop"},
+            ]
+        )
+
+    with patch("litellm.anthropic_interface.messages.acreate", new=_streaming_acreate):
+        litellm_instrumentor.instrument()
+        stream = await litellm.anthropic.messages.acreate(
+            **_anthropic_messages_kwargs(), stream=True
+        )
+
+        assert len(_litellm_spans(exporter.get_finished_spans())) == 0
+
+        chunks = [chunk async for chunk in stream]
+        assert len(chunks) == 4
+
+    spans = _litellm_spans(exporter.get_finished_spans())
+    exporter.clear()
+    assert len(spans) == 1
+    attrs = spans[0].attributes
+    assert attrs.get("gen_ai.request.streaming") == "True"
+    assert attrs.get("gen_ai.response.id") == "msg_stream"
+    assert attrs.get("gen_ai.response.model") == "claude-sonnet-4"
+    assert attrs.get("gen_ai.response.finish_reasons") == "['end_turn']"
+    assert attrs.get("gen_ai.usage.input_tokens") == 6
+    assert attrs.get("gen_ai.usage.output_tokens") == 2

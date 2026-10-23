@@ -164,6 +164,7 @@ _GENERIC_AI_CONTRIB_DENYLIST = {
     "groq",
     "langchain",
     "llamaindex",
+    "mcp",
     "mistralai",
     "ollama",
     "replicate",
