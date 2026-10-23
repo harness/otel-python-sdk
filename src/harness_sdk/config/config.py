@@ -8,6 +8,7 @@ from google.protobuf import json_format
 
 from harness_sdk.config import config_pb2
 from harness_sdk.config.default import DEFAULT, SDK_CONFIG_KEYS
+from harness_sdk.config.yaml_values import normalize_config_dict
 from harness_sdk.config.environment import overwrite_with_environment
 from harness_sdk.env import get_env_value
 from harness_sdk.otlp_reporting import normalize_reporting_dict
@@ -94,6 +95,8 @@ def build_config():
     file_dict = read_from_file()
     if file_dict is not None:
         merge_config(config_dict, _filter_sdk_config(file_dict))
+
+    normalize_config_dict(config_dict, DEFAULT)
 
     plugins_config = config_dict.pop('plugins', {})
     gen_ai_config = config_dict.get('gen_ai', {})
