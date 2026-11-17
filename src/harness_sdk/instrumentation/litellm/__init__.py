@@ -730,17 +730,18 @@ class _StreamSpanWrapper(wrapt.ObjectProxy):
             if exc is not None:
                 self._self_span.record_exception(exc)
                 self._self_span.set_status(Status(StatusCode.ERROR, str(exc)))
-            else:
-                aggregated = _aggregate_stream_response(
-                    self._self_chunks, self._self_messages
+            # Chunks already yielded were billed by the provider. Keep that
+            # usage when a later chunk raises, instead of leaving the span empty.
+            aggregated = _aggregate_stream_response(
+                self._self_chunks, self._self_messages
+            )
+            if aggregated is not None:
+                _set_response_attributes(
+                    self._self_otel_logger,
+                    self._self_span,
+                    aggregated,
+                    request_model=self._self_request_model,
                 )
-                if aggregated is not None:
-                    _set_response_attributes(
-                        self._self_otel_logger,
-                        self._self_span,
-                        aggregated,
-                        request_model=self._self_request_model,
-                    )
         except Exception as err:  # pylint: disable=broad-except
             logger.debug("LiteLLM: failed to finalize stream span: %s", err)
         finally:
