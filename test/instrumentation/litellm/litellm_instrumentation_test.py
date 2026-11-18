@@ -4,6 +4,7 @@ from test.control_test_helpers import AlwaysBlockControlPlugin
 from unittest.mock import patch
 
 import pytest
+from opentelemetry.trace import StatusCode
 
 pytest.importorskip("litellm")
 
@@ -500,6 +501,15 @@ class _FakeAnthropicStream:
         return chunk
 
 
+class _AnthropicStreamErrorAfterChunks(_FakeAnthropicStream):
+    """Yield the given chunks, then fail instead of ending the stream."""
+
+    async def __anext__(self):
+        if self._index >= len(self._chunks):
+            raise RuntimeError("upstream closed")
+        return await super().__anext__()
+
+
 def _anthropic_messages_kwargs():
     return {
         "model": "bedrock/anthropic.claude-sonnet-4",
@@ -653,3 +663,45 @@ async def test_litellm_anthropic_acreate_streaming_defers_until_consumed(  # pyl
     assert attrs.get("gen_ai.response.finish_reasons") == "['end_turn']"
     assert attrs.get("gen_ai.usage.input_tokens") == 6
     assert attrs.get("gen_ai.usage.output_tokens") == 2
+
+
+@pytest.mark.asyncio
+async def test_litellm_anthropic_acreate_streaming_error_keeps_partial_usage(  # pylint: disable=unused-argument
+    agent, exporter, litellm_instrumentor
+):
+    async def _streaming_acreate(*_args, **_kwargs):
+        return _AnthropicStreamErrorAfterChunks(
+            [
+                (
+                    b'data: {"type":"message_start","message":{"id":"msg_err",'
+                    b'"type":"message","role":"assistant","model":"claude-sonnet-4",'
+                    b'"content":[],"usage":{"input_tokens":6,"output_tokens":1,'
+                    b'"cache_read_input_tokens":80,'
+                    b'"cache_creation_input_tokens":5}}}\n\n'
+                ),
+                {
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                    "usage": {"output_tokens": 4},
+                },
+            ]
+        )
+
+    with patch("litellm.anthropic_interface.messages.acreate", new=_streaming_acreate):
+        litellm_instrumentor.instrument()
+        stream = await litellm.anthropic.messages.acreate(
+            **_anthropic_messages_kwargs(), stream=True
+        )
+        with pytest.raises(RuntimeError, match="upstream closed"):
+            async for _chunk in stream:
+                pass
+
+    spans = _litellm_spans(exporter.get_finished_spans())
+    exporter.clear()
+    assert len(spans) == 1
+    assert spans[0].status.status_code == StatusCode.ERROR
+    attrs = spans[0].attributes
+    assert attrs.get("gen_ai.usage.input_tokens") == 6
+    assert attrs.get("gen_ai.usage.output_tokens") == 4
+    assert attrs.get("gen_ai.usage.cache_read.input_tokens") == 80
+    assert attrs.get("gen_ai.usage.cache_creation.input_tokens") == 5
