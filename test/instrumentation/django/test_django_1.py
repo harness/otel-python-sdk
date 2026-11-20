@@ -1,3 +1,5 @@
+import base64
+
 import pytest
 from pytest_django.lazy_django import skip_if_no_django
 
@@ -97,6 +99,29 @@ def test_collects_body_data(django_client, agent):
     assert attrs["http.request.body"] == '{"some_client_data": "123"}'
     assert attrs["http.response.header.content-type"] == 'application/json'
     assert attrs["http.response.body"] == '{"data": 123}'
+
+
+def test_collects_multipart_body_as_base64(django_client, agent):
+    boundary = 'xBoundaryx'
+    # a file part that is not valid UTF-8 and contains NUL
+    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="a.bin"\r\n\r\n'
+            .encode() + b'\x00\xff\xfe\x80' + f'\r\n--{boundary}--\r\n'.encode())
+    response = django_client.post(
+        '/test/123',
+        data=body,
+        content_type=f'multipart/form-data; boundary={boundary}',
+    )
+    assert response.status_code == 200
+
+    span_list = _django_spans(memoryExporter.get_finished_spans())
+    memoryExporter.clear()
+    assert len(span_list) == 1
+    attrs = span_list[0].attributes
+    assert 'http.request.body' not in attrs
+    encoded = attrs['http.request.body.base64']
+    assert base64.b64decode(encoded + '=' * (-len(encoded) % 4)) == body
+    # the response is JSON, so it is still captured as text
+    assert attrs['http.response.body'] == '{"data": 123}'
 
 
 def test_can_block(django_client, agent_with_filter, exporter):

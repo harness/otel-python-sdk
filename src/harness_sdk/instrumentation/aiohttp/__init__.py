@@ -149,11 +149,16 @@ def create_trace_config(  # pylint:disable=R0915
                 content_stream._cursor = 0  # pylint: disable=W0212
                 content_stream._buffer = tmp_deque  # pylint: disable=W0212
 
-        # Convert collected request body bytes to string
+        # Convert collected request body bytes to string. multipart bodies stay as raw bytes
+        # so file parts survive and are captured as base64.
         request_body = ''
         if hasattr(trace_config_ctx, 'request_body') and trace_config_ctx.request_body:
             try:
-                request_body = trace_config_ctx.request_body.decode('utf-8', errors='replace')
+                if aiohttp_client_wrapper.is_multipart_form_data(
+                        aiohttp_client_wrapper.lowercase_headers(params.headers)):
+                    request_body = trace_config_ctx.request_body
+                else:
+                    request_body = trace_config_ctx.request_body.decode('utf-8', errors='replace')
             except Exception as e:  # pylint:disable=W0718
                 logger.error('Error decoding request body: %s', str(e))
 

@@ -1,4 +1,5 @@
 '''Base class of all Hypertrace Instrumentation Wrapper classes'''
+import base64
 import sys
 import traceback
 from opentelemetry.trace.span import Span
@@ -20,6 +21,11 @@ class BaseInstrumentorWrapper:
     RPC_RESPONSE_METADATA_PREFIX = 'rpc.response.metadata.'
     RPC_REQUEST_BODY_PREFIX = 'rpc.request.body'
     RPC_RESPONSE_BODY_PREFIX = 'rpc.response.body'
+    # multipart/form-data bodies carry binary file parts, so they are not stored as text.
+    # They go on the span as base64 of the raw bytes under '<body attribute>.base64'
+    # and the Traceable agent decodes them after export.
+    BODY_BASE64_SUFFIX = '.base64'
+    MULTIPART_FORM_DATA = 'multipart/form-data'
 
     # Constructor
     def __init__(self):
@@ -62,6 +68,29 @@ class BaseInstrumentorWrapper:
                 return True
         return False
 
+    @property
+    def max_body_size(self) -> int:
+        '''Configured max captured body size in bytes (0 means unlimited)'''
+        return self._max_body_size
+
+    def is_multipart_form_data(self, headers: dict) -> bool:
+        '''True when the (lowercased) headers describe a multipart/form-data body'''
+        content_type = headers.get("content-type")
+        if not isinstance(content_type, str):
+            return False
+        return content_type.startswith(self.MULTIPART_FORM_DATA)
+
+    def encode_body_as_base64(self, body) -> str:
+        '''Unpadded base64 of the raw body bytes, cut to the configured max size.
+        The max size applies to the raw bytes so the encoded value is always valid base64.'''
+        if isinstance(body, str):
+            raw = body.encode('UTF8', 'replace')
+        else:
+            raw = bytes(body)
+        if self._max_body_size:
+            raw = raw[0 : self._max_body_size]
+        return base64.b64encode(raw).decode('ascii').rstrip('=')
+
     def _capture_headers(self, record_headers: bool, header_prefix: str,  # pylint:disable=R0913,R0917
                          span, headers: dict, record_body):
         try:  # pylint: disable=R1702
@@ -100,6 +129,13 @@ class BaseInstrumentorWrapper:
                 content_type = self.eligible_based_on_content_type(lowercased_headers)
 
                 if content_type is False:
+                    return span
+
+                if (self.is_multipart_form_data(lowercased_headers)
+                        and isinstance(body, (bytes, bytearray, str))):
+                    if len(body) > 0:
+                        span.set_attribute(body_prefix + self.BODY_BASE64_SUFFIX,
+                                           self.encode_body_as_base64(body))
                     return span
 
                 body_str = None

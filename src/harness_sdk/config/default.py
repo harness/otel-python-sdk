@@ -34,7 +34,8 @@ DEFAULT = {
             'response': True,
         },
         'body_max_size_bytes': 131072,
-        'allowed_content_types': ['json', 'xml', 'grpc', 'x-www-form-urlencoded', 'graphql']
+        'allowed_content_types': ['json', 'xml', 'grpc', 'x-www-form-urlencoded', 'graphql',
+                                  'multipart/form-data']
     },
     'resource_attributes': {},
     'span_attributes': {},
