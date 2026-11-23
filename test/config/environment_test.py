@@ -38,6 +38,8 @@ def test_env_config() -> None:
     assert config.enabled.value is True
     content_type_values = [item.value for item in config.data_capture.allowed_content_types]
     assert "json" in content_type_values
+    # an explicit allowlist replaces the default, so multipart/form-data is not added back
+    assert content_type_values == ["json", "foo", "bar"]
     resource_attrs = config.resource_attributes
     assert resource_attrs['1'] == '123'
     unset_env_variables()

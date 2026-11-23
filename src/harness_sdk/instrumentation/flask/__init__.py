@@ -19,6 +19,27 @@ _InstrumentedFlask._commenter_options = {}  # pylint:disable=W0212
 logger = get_custom_logger(__name__)
 
 
+def _read_request_body(flask_wrapper):
+    '''Request body to capture / evaluate.
+
+    flask.request.data is empty for multipart/form-data because werkzeug parses those bodies
+    into request.form / request.files. For multipart, read the raw bytes with get_data(), which
+    caches them so the app can still parse the form. Large uploads are not buffered: only
+    bodies whose Content-Length is known and within the configured max body size are read,
+    and only when multipart bodies are allowed for capture.
+    '''
+    request = flask.request
+    headers = flask_wrapper.lowercase_headers(request.headers)
+    if not flask_wrapper.is_multipart_form_data(headers):
+        return request.data
+    if not flask_wrapper.eligible_based_on_content_type(headers):
+        return b''
+    max_size = flask_wrapper.max_body_size
+    if request.content_length is None or (max_size and request.content_length > max_size):
+        return b''
+    return request.get_data()
+
+
 # Per request pre-handler
 def _hypertrace_before_request(flask_wrapper):
     '''This function is invoked by flask to set the handler'''
@@ -36,7 +57,7 @@ def _hypertrace_before_request(flask_wrapper):
             # for now, assuming single threaded mode (multiple python processes)
             request_headers = flask.request.headers
             # Pull message body
-            request_body = flask.request.data  # same
+            request_body = _read_request_body(flask_wrapper)
 
             span.update_name(str(flask.request.method) + ' ' + str(flask.request.url_rule))
 
@@ -46,7 +67,7 @@ def _hypertrace_before_request(flask_wrapper):
             control_result = get_control_registry().evaluate(span,
                                                     flask.request.url,
                                                     flask.request.headers,
-                                                    flask.request.data,
+                                                    request_body,
                                                     False)
             if control_result.block:
                 logger.debug('should block evaluated to true, aborting')
